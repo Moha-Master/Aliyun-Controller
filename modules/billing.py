@@ -125,23 +125,29 @@ def summarize_billing_module(billing_cycle: str):
 
     for item in all_items:
         product_code = item.get('ProductCode', 'Unknown')
+        product_name = item.get('ProductName', 'Unknown')
         amount = float(item.get('PretaxAmount', 0.0))
         if product_code not in summary:
-            summary[product_code] = {'total_amount': 0.0, 'count': 0}
+            summary[product_code] = {'product_name': product_name, 'total_amount': 0.0, 'count': 0}
+        summary[product_code]['product_name'] = product_name  # 更新产品名称（同一产品代码可能有多个名称，取最后一个）
         summary[product_code]['total_amount'] += amount
         summary[product_code]['count'] += 1
 
-    print("\n" + "="*50)
-    print(f"账单周期 {billing_cycle} 消费归纳".center(50))
-    print("="*50)
-    print(f"{'产品代码':<20} {'总金额 (元)':<15} {'账单条数':<10}")
-    print("-"*50)
+    # 按金额从大到小排序
+    sorted_summary = sorted(summary.items(), key=lambda x: x[1]['total_amount'], reverse=True)
+
+    print("\n" + "="*70)
+    print(f"账单周期 {billing_cycle} 消费归纳".center(70))
+    print("="*70)
+    print(f"{'产品名称':<25} {'产品代码':<15} {'账单条数':<10} {'总金额 (元)':<15}")
+    print("-"*70)
     
     total_amount = 0.0
-    for product, data in sorted(summary.items()):
+    for product_code, data in sorted_summary:
         total_amount += data['total_amount']
-        print(f"{product:<20} {data['total_amount']:<15.2f} {data['count']:<10}")
+        product_name = data['product_name'][:24]  # 截断过长的产品名称
+        print(f"{product_name:<25} {product_code:<15} {data['count']:<10} {data['total_amount']:<15.2f}")
 
-    print("-"*50)
-    print(f"总计: {total_amount:.2f} 元".rjust(50))
-    print("="*50)
+    print("-"*70)
+    print(f"总计: {total_amount:.2f} 元".rjust(70))
+    print("="*70)

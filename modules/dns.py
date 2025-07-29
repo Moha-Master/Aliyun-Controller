@@ -149,33 +149,78 @@ def dns_management_module():
         if not selected_domain: # 用户选择 [返回主菜单]
             return
 
+        # 排序设置：类型(0-创建时间, 1-二级域名, 2-首字母) 和 顺序(0-逆序, 1-正序)
+        sort_type = 0  # 默认按创建时间排序
+        sort_order = 0  # 默认逆序
+
         while True: # 循环用于对选定域名进行操作
             records = dns_querier.get_domain_records(selected_domain)
+            
+            # 根据排序设置对记录进行排序
+            if sort_type == 0:
+                # 按创建时间排序
+                # 注意：阿里云DNS API返回的记录默认就是按创建时间排序的
+                if sort_order == 0:  # 逆序
+                    records.reverse()
+            elif sort_type == 1:
+                # 按二级域名字母排序
+                records.sort(key=lambda r: r.get('RR', '').split('.')[-1] if '.' in r.get('RR', '') else r.get('RR', ''), 
+                            reverse=(sort_order == 0))
+            elif sort_type == 2:
+                # 按首字母排序
+                records.sort(key=lambda r: r.get('RR', ''), reverse=(sort_order == 0))
+            
+            # 构建记录选项列表
+            record_choices = []
+            if records:
+                for i, record in enumerate(records):
+                    record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {record.get('Value'):<30} {record.get('TTL')}"
+                    record_choices.append(Choice(value=i, name=record_name))
+                
+                # 添加分隔线（不可选择）
+                record_choices.append(Choice(value="separator", name="-" * 80, enabled=False))
+            
+            # 添加操作选项
+            sort_type_text = ["创建时间", "二级域名", "首字母"][sort_type]
+            sort_order_text = "逆序" if sort_order == 0 else "正序"
+            record_choices.extend([
+                Choice(value="add", name="新增解析记录"),
+                Choice(value="sort", name=f"排序设置 [{sort_type_text}, {sort_order_text}]"),
+                Choice(value="refresh", name="刷新记录列表"),
+                Choice(value=None, name="[返回域名选择]")
+            ])
+
             print("\n" + "="*80)
             print(f"域名 {selected_domain} 的解析记录".center(80))
             print("="*80)
+            
             if not records:
                 print("未找到任何解析记录。")
+                print("="*80)
+                # 如果没有记录，只显示添加和返回选项
+                action_choices = [
+                    Choice(value="add", name="新增解析记录"),
+                    Choice(value=None, name="[返回域名选择]")]                
+                action_questions = [
+                    {
+                        "type": "list",
+                        "message": "请选择操作:",
+                        "choices": action_choices,
+                        "name": "dns_action",
+                    }
+                ]
             else:
                 print(f"{'主机记录(RR)':<20} {'类型':<10} {'记录值(Value)':<30} {'TTL'}")
                 print("--------------------------------------------------------------------------------")
-                for record in records:
-                    print(f"{record.get('RR'):<20} {record.get('Type'):<10} {record.get('Value'):<30} {record.get('TTL')}")
-            print("="*80)
+                action_questions = [
+                    {
+                        "type": "list",
+                        "message": "请选择要操作的记录或操作:",
+                        "choices": record_choices,
+                        "name": "dns_action",
+                    }
+                ]
             
-            action_questions = [
-                {
-                    "type": "list",
-                    "message": "请选择操作:",
-                    "choices": [
-                        Choice("add", "新增解析记录"),
-                        Choice("update", "修改解析记录"),
-                        Choice("delete", "删除解析记录"),
-                        Choice(value=None, name="[返回域名选择]")
-                    ],
-                    "name": "dns_action",
-                }
-            ]
             action_result = prompt(action_questions)
             if not action_result: # 用户在操作选择时按 Ctrl+C
                 print("\n操作已取消，返回域名选择。")
@@ -185,6 +230,84 @@ def dns_management_module():
             if not dns_action: # 用户选择 [返回域名选择]
                 break
 
+            # 处理记录选择
+            if isinstance(dns_action, int) and 0 <= dns_action < len(records):
+                selected_record = records[dns_action]
+                
+                # 为选中的记录提供编辑/删除选项
+                record_action_questions = [
+                    {
+                        "type": "list",
+                        "message": f"对记录 {selected_record.get('RR')}.{selected_domain} ({selected_record.get('Type')}: {selected_record.get('Value')}) 执行操作:",
+                        "choices": [
+                            Choice("edit", "编辑记录"),
+                            Choice("delete", "删除记录"),
+                            Choice(value=None, name="[取消]")
+                        ],
+                        "name": "record_action",
+                    }
+                ]
+                
+                record_action_result = prompt(record_action_questions)
+                if not record_action_result:
+                    print("\n操作已取消，返回记录列表。")
+                    continue
+                    
+                record_action = record_action_result.get("record_action")
+                if not record_action:
+                    print("\n操作已取消，返回记录列表。")
+                    continue
+
+                if record_action == "edit":
+                    print(f"\n您正在编辑以下记录:")
+                    print(f"  主机记录 (RR): {selected_record.get('RR')}")
+                    print(f"  记录类型 (Type): {selected_record.get('Type')}")
+                    print(f"  记录值 (Value): {selected_record.get('Value')}")
+                    print(f"  TTL: {selected_record.get('TTL')}")
+
+                    update_fields_questions = [
+                        {"type": "input", "message": f"新的主机记录 (当前: {selected_record.get('RR')}, 留空则不修改):", "name": "rr", "default": selected_record.get('RR')},
+                        {"type": "input", "message": f"新的记录类型 (当前: {selected_record.get('Type')}, 留空则不修改):", "name": "type", "default": selected_record.get('Type')},
+                        {"type": "input", "message": f"新的记录值 (当前: {selected_record.get('Value')}, 留空则不修改):", "name": "value", "default": selected_record.get('Value')},
+                        {"type": "input", "message": f"新的TTL (当前: {selected_record.get('TTL')}, 留空则不修改):", "name": "ttl", "default": str(selected_record.get('TTL'))},
+                    ]
+                    update_answers = prompt(update_fields_questions)
+                    if not update_answers:
+                        print("\n操作已取消，返回记录列表。")
+                        continue
+
+                    dns_querier.update_domain_record(
+                        record_id=selected_record.get('RecordId'),
+                        rr=update_answers.get('rr') or selected_record.get('RR'),
+                        type=(update_answers.get('type') or selected_record.get('Type')).upper(),
+                        value=update_answers.get('value') or selected_record.get('Value'),
+                        ttl=int(update_answers.get('ttl') or selected_record.get('TTL'))
+                    )
+
+                elif record_action == "delete":
+                    full_record_name = f"{selected_record.get('RR')}.{selected_domain}"
+                    confirmation_question = [
+                        {
+                            "type": "confirm",
+                            "message": f"确定要删除解析记录 {full_record_name} (类型: {selected_record.get('Type')}, 值: {selected_record.get('Value')}) 吗?",
+                            "default": False,
+                            "name": "confirm_delete",
+                        }
+                    ]
+                    confirmation_result = prompt(confirmation_question)
+                    if not confirmation_result:
+                        print("\n操作已取消，返回记录列表。")
+                        continue
+                    
+                    if confirmation_result.get("confirm_delete"):
+                        dns_querier.delete_domain_record(selected_record.get('RecordId'))
+                    else:
+                        print("删除操作已取消。")
+                
+                # 继续显示记录列表
+                continue
+
+            # 处理其他操作
             if dns_action == "add":
                 add_questions = [
                     {"type": "input", "message": "主机记录 (例如 www):", "name": "rr"},
@@ -194,7 +317,7 @@ def dns_management_module():
                 ]
                 add_answers = prompt(add_questions)
                 if not add_answers:
-                    print("\n操作已取消，返回操作选择菜单。")
+                    print("\n操作已取消，返回记录列表。")
                     continue
                 
                 if not all(add_answers.get(k) for k in ['rr', 'type', 'value']):
@@ -216,140 +339,77 @@ def dns_management_module():
                     ttl=ttl_value
                 )
 
-            elif dns_action == "update":
-                update_questions = [
-                    {"type": "input", "message": "请输入要修改记录的主机记录 (RR):", "name": "rr_to_find"},
-                ]
-                update_answers = prompt(update_questions)
-                if not update_answers:
-                    print("\n操作已取消，返回操作选择菜单。")
-                    continue
-
-                rr_to_find = update_answers.get('rr_to_find')
-
-                if not rr_to_find:
-                    print("必须提供主机记录 (RR) 来定位记录。")
-                    continue
-
-                matching_records = [r for r in records if r.get('RR') == rr_to_find]
-
-                if not matching_records:
-                    print(f"未找到主机记录 {rr_to_find} 的记录。")
-                    continue
-
-                target_record = None
-                if len(matching_records) > 1:
-                    record_choices = []
-                    for i, record in enumerate(matching_records):
-                        record_choices.append(Choice(value=i, name=f"RR: {record.get('RR')}, Type: {record.get('Type')}, Value: {record.get('Value')}, TTL: {record.get('TTL')}"))
-
-                    record_selection_question = [
-                        {
-                            "type": "list",
-                            "message": "找到多条匹配记录，请选择要修改的记录:",
-                            "choices": record_choices,
-                            "name": "selected_record_index",
-                        }
-                    ]
-                    selection_result = prompt(record_selection_question)
-                    if not selection_result:
-                        print("\n操作已取消，返回操作选择菜单。")
-                        continue
-                    selected_index = selection_result.get("selected_record_index")
-                    target_record = matching_records[selected_index]
-                else:
-                    target_record = matching_records[0]
+            elif dns_action == "sort":
+                # 进入排序设置子页面
+                # 保存当前设置以防用户取消操作
+                prev_sort_type = sort_type
+                prev_sort_order = sort_order
                 
-                if not target_record:
-                    continue
-
-                print(f"您选择了以下记录进行修改:")
-                print(f"  主机记录 (RR): {target_record.get('RR')}")
-                print(f"  记录类型 (Type): {target_record.get('Type')}")
-                print(f"  记录值 (Value): {target_record.get('Value')}")
-                print(f"  TTL: {target_record.get('TTL')}")
-
-                update_fields_questions = [
-                    {"type": "input", "message": f"新的主机记录 (当前: {target_record.get('RR')}, 留空则不修改):", "name": "rr", "default": target_record.get('RR')},
-                    {"type": "input", "message": f"新的记录类型 (当前: {target_record.get('Type')}, 留空则不修改):", "name": "type", "default": target_record.get('Type')},
-                    {"type": "input", "message": f"新的记录值 (当前: {target_record.get('Value')}, 留空则不修改):", "name": "value", "default": target_record.get('Value')},
-                    {"type": "input", "message": f"新的TTL (当前: {target_record.get('TTL')}, 留空则不修改):", "name": "ttl", "default": str(target_record.get('TTL'))},
+                # 创建排序设置界面
+                sort_type_choices = [
+                    Choice(0, "创建时间排序"),
+                    Choice(1, "二级域名排序"),
+                    Choice(2, "首字母排序")
                 ]
-                update_answers = prompt(update_fields_questions)
-                if not update_answers:
-                    print("\n操作已取消，返回操作选择菜单。")
-                    continue
-
-                dns_querier.update_domain_record(
-                    record_id=target_record.get('RecordId'),
-                    rr=update_answers.get('rr') or target_record.get('RR'),
-                    type=(update_answers.get('type') or target_record.get('Type')).upper(),
-                    value=update_answers.get('value') or target_record.get('Value'),
-                    ttl=int(update_answers.get('ttl') or target_record.get('TTL'))
-                )
-
-            elif dns_action == "delete":
-                delete_questions = [
-                    {"type": "input", "message": "请输入要删除记录的主机记录 (RR):", "name": "rr_to_delete"},
-                ]
-                delete_answers = prompt(delete_questions)
-                if not delete_answers:
-                    print("\n操作已取消，返回操作选择菜单。")
-                    continue
-
-                rr_to_delete = delete_answers.get('rr_to_delete')
-
-                if not rr_to_delete:
-                    print("必须提供主机记录 (RR) 来定位要删除的记录。")
-                    continue
-
-                matching_records = [r for r in records if r.get('RR') == rr_to_delete]
-
-                if not matching_records:
-                    print(f"未找到主机记录 {rr_to_delete} 的记录。")
-                    continue
                 
-                target_record = None
-                if len(matching_records) > 1:
-                    record_choices = []
-                    for i, record in enumerate(matching_records):
-                        record_choices.append(Choice(value=i, name=f"RR: {record.get('RR')}, Type: {record.get('Type')}, Value: {record.get('Value')}, TTL: {record.get('TTL')}"))
-
-                    record_selection_question = [
-                        {
-                            "type": "list",
-                            "message": "找到多条匹配记录，请选择要删除的记录:",
-                            "choices": record_choices,
-                            "name": "selected_record_index",
-                        }
-                    ]
-                    selection_result = prompt(record_selection_question)
-                    if not selection_result:
-                        print("\n操作已取消，返回操作选择菜单。")
-                        continue
-                    selected_index = selection_result.get("selected_record_index")
-                    target_record = matching_records[selected_index]
-                else:
-                    target_record = matching_records[0]
-
-                if not target_record:
-                    continue
-
-                full_record_name = f"{target_record.get('RR')}.{selected_domain}"
-                confirmation_question = [
+                sort_order_choices = [
+                    Choice(0, "逆序"),
+                    Choice(1, "正序")
+                ]
+                
+                # 显示当前选择
+                print("\n" + "="*50)
+                print("排序设置".center(50))
+                print("="*50)
+                print(f"当前设置: {['创建时间', '二级域名', '首字母'][sort_type]}, {'逆序' if sort_order == 0 else '正序'}")
+                print("="*50)
+                
+                # 选择排序类型
+                sort_type_question = [
                     {
-                        "type": "confirm",
-                        "message": f"确定要删除解析记录 {full_record_name} (类型: {target_record.get('Type')}, 值: {target_record.get('Value')}) 吗?",
-                        "default": False,
-                        "name": "confirm_delete",
+                        "type": "list",
+                        "message": "请选择排序类型:",
+                        "choices": sort_type_choices,
+                        "default": sort_type,
+                        "name": "sort_type"
                     }
                 ]
-                confirmation_result = prompt(confirmation_question)
-                if not confirmation_result:
-                    print("\n操作已取消，返回操作选择菜单。")
-                    continue
                 
-                if confirmation_result.get("confirm_delete"):
-                    dns_querier.delete_domain_record(target_record.get('RecordId'))
-                else:
-                    print("删除操作已取消。")
+                sort_type_result = prompt(sort_type_question)
+                if not sort_type_result or sort_type_result.get("sort_type") is None:
+                    # 恢复原设置并返回
+                    sort_type = prev_sort_type
+                    sort_order = prev_sort_order
+                    continue
+                    
+                new_sort_type = sort_type_result.get("sort_type")
+                
+                # 选择排序顺序
+                sort_order_question = [
+                    {
+                        "type": "list",
+                        "message": "请选择排序顺序:",
+                        "choices": sort_order_choices,
+                        "default": sort_order,
+                        "name": "sort_order"
+                    }
+                ]
+                
+                sort_order_result = prompt(sort_order_question)
+                if not sort_order_result or sort_order_result.get("sort_order") is None:
+                    # 恢复原设置并返回
+                    sort_type = prev_sort_type
+                    sort_order = prev_sort_order
+                    continue
+                    
+                new_sort_order = sort_order_result.get("sort_order")
+                
+                # 更新排序设置并直接返回主列表
+                sort_type = new_sort_type
+                sort_order = new_sort_order
+                print(f"\n排序设置已更新为: {['创建时间', '二级域名', '首字母'][sort_type]}, {'逆序' if sort_order == 0 else '正序'}")
+                print("正在返回DNS记录列表...")
+
+            elif dns_action == "refresh":
+                # 刷新操作，直接继续循环
+                continue

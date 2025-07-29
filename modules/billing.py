@@ -55,13 +55,35 @@ class AliCloudBssQuerier:
             print(f"\n查询 [{subscription_type}] 类型账单时出错: {e}")
             return []
 
+    def fetch_all_bill_details(self, billing_cycle: str) -> list:
+        """
+        获取所有类型的账单明细（PayAsYouGo + Subscription）
+        """
+        all_items = []
+        all_items.extend(self.fetch_bill_details(billing_cycle, 'PayAsYouGo'))
+        all_items.extend(self.fetch_bill_details(billing_cycle, 'Subscription'))
+        return all_items
+
+    def convert_usage_to_bytes(self, usage: float, unit: str) -> float:
+        """
+        将用量转换为字节
+        """
+        unit = unit.upper()
+        if unit == 'GB':
+            return usage * 1024 * 1024 * 1024
+        elif unit == 'MB':
+            return usage * 1024 * 1024
+        elif unit == 'KB':
+            return usage * 1024
+        else:
+            return usage
+
 def get_outbound_traffic_module(billing_cycle: str):
     """
     流量查询模块
     """
     querier = AliCloudBssQuerier()
     total_usage_bytes = 0.0
-    all_items = []
 
     TRAFFIC_ITEMS_CODES = [
         "ECS_Out_Bytes",
@@ -73,8 +95,7 @@ def get_outbound_traffic_module(billing_cycle: str):
 
     print(f"\n正在查询账单周期 {billing_cycle} 的账单明细...")
     
-    all_items.extend(querier.fetch_bill_details(billing_cycle, 'PayAsYouGo'))
-    all_items.extend(querier.fetch_bill_details(billing_cycle, 'Subscription'))
+    all_items = querier.fetch_all_bill_details(billing_cycle)
     
     if not all_items:
         print("未发现任何账单明细。")
@@ -89,15 +110,7 @@ def get_outbound_traffic_module(billing_cycle: str):
                 try:
                     usage = float(usage_str)
                     if usage > 0:
-                        usage_bytes = 0
-                        if unit == 'GB':
-                            usage_bytes = usage * 1024 * 1024 * 1024
-                        elif unit == 'MB':
-                            usage_bytes = usage * 1024 * 1024
-                        elif unit == 'KB':
-                            usage_bytes = usage * 1024
-                        else:
-                            usage_bytes = usage
+                        usage_bytes = querier.convert_usage_to_bytes(usage, unit)
                         total_usage_bytes += usage_bytes
                 except ValueError:
                     continue
@@ -112,12 +125,10 @@ def summarize_billing_module(billing_cycle: str):
     当月完整账单归纳模块
     """
     querier = AliCloudBssQuerier()
-    all_items = []
     summary = {}
 
     print(f"\n正在获取账单周期 {billing_cycle} 的所有账单明细...")
-    all_items.extend(querier.fetch_bill_details(billing_cycle, 'PayAsYouGo'))
-    all_items.extend(querier.fetch_bill_details(billing_cycle, 'Subscription'))
+    all_items = querier.fetch_all_bill_details(billing_cycle)
 
     if not all_items:
         print("未发现任何账单明细。")

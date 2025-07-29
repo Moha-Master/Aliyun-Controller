@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from InquirerPy.resolver import prompt
 from InquirerPy.base.control import Choice
@@ -65,6 +66,10 @@ class AliCloudDnsQuerier:
         """
         添加新的解析记录
         """
+        # 验证输入参数
+        if not self._validate_dns_record(rr, type, value, ttl):
+            return False
+            
         request = alidns_20150109_models.AddDomainRecordRequest(
             domain_name=domain_name,
             rr=rr,
@@ -84,6 +89,10 @@ class AliCloudDnsQuerier:
         """
         更新现有的解析记录
         """
+        # 验证输入参数
+        if not self._validate_dns_record(rr, type, value, ttl):
+            return False
+            
         request = alidns_20150109_models.UpdateDomainRecordRequest(
             record_id=record_id,
             rr=rr,
@@ -113,6 +122,83 @@ class AliCloudDnsQuerier:
         except Exception as e:
             print(f"\n删除解析记录时出错: {e}")
             return False
+
+    def _validate_dns_record(self, rr: str, type: str, value: str, ttl: int) -> bool:
+        """
+        验证DNS记录参数的合法性
+        """
+        # 验证主机记录
+        if not rr or len(rr) > 253:
+            print("\n主机记录不能为空且长度不能超过253个字符")
+            return False
+            
+        # 验证记录类型
+        valid_types = ['A', 'CNAME', 'MX', 'TXT', 'SRV', 'AAAA', 'NS', 'ANAME']
+        if type.upper() not in valid_types:
+            print(f"\n不支持的记录类型: {type}")
+            return False
+            
+        # 验证记录值
+        if not value:
+            print("\n记录值不能为空")
+            return False
+            
+        # 验证TTL (60-86400秒)
+        if not (60 <= ttl <= 86400):
+            print("\nTTL值必须在60-86400之间")
+            return False
+            
+        # 针对不同类型的记录进行额外验证
+        if type.upper() == 'A':
+            # IPv4地址验证
+            if not re.match(r'^(\d{1,3}\.){3}\d{1,3}$', value):
+                print("\nA记录的值必须是有效的IPv4地址")
+                return False
+            parts = value.split('.')
+            if any(int(part) > 255 for part in parts):
+                print("\nA记录的值必须是有效的IPv4地址")
+                return False
+        elif type.upper() == 'AAAA':
+            # IPv6地址验证（简单验证）
+            if not re.match(r'^[0-9a-fA-F:]+$', value):
+                print("\nAAAA记录的值必须是有效的IPv6地址")
+                return False
+        elif type.upper() == 'CNAME':
+            # CNAME验证（简单验证）
+            if not re.match(r'^[a-zA-Z0-9.-]+$', value):
+                print("\nCNAME记录的值格式不正确")
+                return False
+            if value.endswith('.'):
+                print("\nCNAME记录的值不能以点结尾")
+                return False
+                
+        return True
+
+    def sort_records(self, records: list, sort_type: int, sort_order: int) -> list:
+        """
+        对DNS记录进行排序
+        :param records: DNS记录列表
+        :param sort_type: 排序类型 (0-创建时间, 1-二级域名, 2-首字母)
+        :param sort_order: 排序顺序 (0-逆序, 1-正序)
+        :return: 排序后的记录列表
+        """
+        if sort_type == 0:
+            # 按创建时间排序 (默认就是按创建时间排序)
+            if sort_order == 0:  # 逆序
+                records.reverse()
+        elif sort_type == 1:
+            # 按二级域名字母排序
+            records.sort(
+                key=lambda r: r.get('RR', '').split('.')[-1] if '.' in r.get('RR', '') else r.get('RR', ''),
+                reverse=(sort_order == 0)
+            )
+        elif sort_type == 2:
+            # 按首字母排序
+            records.sort(
+                key=lambda r: r.get('RR', ''),
+                reverse=(sort_order == 0)
+            )
+        return records
 
 def dns_management_module():
     """
@@ -155,20 +241,8 @@ def dns_management_module():
 
         while True: # 循环用于对选定域名进行操作
             records = dns_querier.get_domain_records(selected_domain)
-            
             # 根据排序设置对记录进行排序
-            if sort_type == 0:
-                # 按创建时间排序
-                # 注意：阿里云DNS API返回的记录默认就是按创建时间排序的
-                if sort_order == 0:  # 逆序
-                    records.reverse()
-            elif sort_type == 1:
-                # 按二级域名字母排序
-                records.sort(key=lambda r: r.get('RR', '').split('.')[-1] if '.' in r.get('RR', '') else r.get('RR', ''), 
-                            reverse=(sort_order == 0))
-            elif sort_type == 2:
-                # 按首字母排序
-                records.sort(key=lambda r: r.get('RR', ''), reverse=(sort_order == 0))
+            records = dns_querier.sort_records(records, sort_type, sort_order)
             
             # 构建记录选项列表
             record_choices = []
@@ -276,12 +350,18 @@ def dns_management_module():
                         print("\n操作已取消，返回记录列表。")
                         continue
 
+                    # 只有当用户输入了新值时才使用新值，否则保留原值
+                    rr = update_answers.get('rr') or selected_record.get('RR')
+                    type_val = (update_answers.get('type') or selected_record.get('Type')).upper()
+                    value = update_answers.get('value') or selected_record.get('Value')
+                    ttl = int(update_answers.get('ttl') or selected_record.get('TTL'))
+
                     dns_querier.update_domain_record(
                         record_id=selected_record.get('RecordId'),
-                        rr=update_answers.get('rr') or selected_record.get('RR'),
-                        type=(update_answers.get('type') or selected_record.get('Type')).upper(),
-                        value=update_answers.get('value') or selected_record.get('Value'),
-                        ttl=int(update_answers.get('ttl') or selected_record.get('TTL'))
+                        rr=rr,
+                        type=type_val,
+                        value=value,
+                        ttl=ttl
                     )
 
                 elif record_action == "delete":

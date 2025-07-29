@@ -1,10 +1,21 @@
 import datetime
 import re
+import logging
+import traceback
 from InquirerPy import prompt
 from InquirerPy.base.control import Choice
 from modules.billing import get_outbound_traffic_module, summarize_billing_module
 from modules.dns import dns_management_module
 
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
 def _prompt_for_billing_cycle() -> str | None:
     """
@@ -33,6 +44,10 @@ def _prompt_for_billing_cycle() -> str | None:
         return f"{year}-{month}"
     except KeyboardInterrupt:
         return None
+    except Exception as e:
+        logging.error(f"输入月份时发生错误: {e}")
+        logging.debug(traceback.format_exc())
+        return None
 
 def query_and_repeat(query_function):
     """
@@ -42,7 +57,12 @@ def query_and_repeat(query_function):
     # 1. 默认查询当月
     current_cycle = datetime.datetime.now().strftime("%Y-%m")
     print(f"\n--- 正在查询默认月份 {current_cycle} 的账单 ---")
-    query_function(current_cycle)
+    try:
+        query_function(current_cycle)
+    except Exception as e:
+        logging.error(f"查询账单时发生错误: {e}")
+        logging.debug(traceback.format_exc())
+        print(f"\n查询账单时发生错误，请查看日志了解详情。")
 
     # 2. 进入子菜单循环
     while True:
@@ -58,28 +78,42 @@ def query_and_repeat(query_function):
             }
         ]
         
-        result = prompt(sub_menu_prompt)
-        if not result: # 用户按 Ctrl+C
-            print("\n已返回主菜单。")
-            break
+        try:
+            result = prompt(sub_menu_prompt)
+            if not result: # 用户按 Ctrl+C
+                print("\n已返回主菜单。")
+                break
 
-        action = result.get("sub_action")
-        if action == "set_date":
-            new_cycle = _prompt_for_billing_cycle()
-            if new_cycle:
-                print(f"\n--- 正在查询 {new_cycle} 的账单 ---")
-                query_function(new_cycle)
-            else:
-                print("\n输入已取消。")
-                continue # 重新显示子菜单
-        elif action == "return":
-            print("\n已返回主菜单。")
-            break
+            action = result.get("sub_action")
+            if action == "set_date":
+                new_cycle = _prompt_for_billing_cycle()
+                if new_cycle:
+                    print(f"\n--- 正在查询 {new_cycle} 的账单 ---")
+                    try:
+                        query_function(new_cycle)
+                    except Exception as e:
+                        logging.error(f"查询账单时发生错误: {e}")
+                        logging.debug(traceback.format_exc())
+                        print(f"\n查询账单时发生错误，请查看日志了解详情。")
+                else:
+                    print("\n输入已取消。")
+                    continue # 重新显示子菜单
+            elif action == "return":
+                print("\n已返回主菜单。")
+                break
+        except Exception as e:
+            logging.error(f"执行操作时发生错误: {e}")
+            logging.debug(traceback.format_exc())
+            print(f"\n执行操作时发生错误，请查看日志了解详情。")
+            continue
 
 def main():
     """
     主函数，提供交互式菜单
     """
+    print("阿里云控制台工具")
+    print("=" * 30)
+    
     while True:
         questions = [
             {
@@ -95,26 +129,40 @@ def main():
             }
         ]
 
-        result = prompt(questions)
-        if not result:
-            print("\n已退出。")
-            break
-            
-        action = result.get("action")
+        try:
+            result = prompt(questions)
+            if not result:
+                print("\n已退出。")
+                break
+                
+            action = result.get("action")
 
-        if action == "get_traffic":
-            query_and_repeat(get_outbound_traffic_module)
-        elif action == "summarize_bill":
-            query_and_repeat(summarize_billing_module)
-        elif action == "manage_dns":
-            dns_management_module()
-        elif action is None:
-            print("已退出。")
-            break
-
+            if action == "get_traffic":
+                query_and_repeat(get_outbound_traffic_module)
+            elif action == "summarize_bill":
+                query_and_repeat(summarize_billing_module)
+            elif action == "manage_dns":
+                try:
+                    dns_management_module()
+                except Exception as e:
+                    logging.error(f"DNS管理模块发生错误: {e}")
+                    logging.debug(traceback.format_exc())
+                    print(f"\nDNS管理模块发生错误，请查看日志了解详情。")
+            elif action is None:
+                print("已退出。")
+                break
+        except Exception as e:
+            logging.error(f"主菜单执行时发生错误: {e}")
+            logging.debug(traceback.format_exc())
+            print(f"\n执行操作时发生错误，请查看日志了解详情。")
+            continue
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
         print("\n\n检测到中断，程序已退出。")
+    except Exception as e:
+        logging.error(f"程序运行时发生未处理的错误: {e}")
+        logging.debug(traceback.format_exc())
+        print(f"\n程序运行时发生未处理的错误，请查看日志了解详情。")

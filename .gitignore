@@ -8,5 +8,22 @@
 __pycache__/
 *.pyc
 
-# RUnning Logfiles
+# Log files
 *.log
+
+# Configuration files
+config.yaml
+
+# Python package info
+*.egg-info/
+
+# Distribution builds
+dist/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db

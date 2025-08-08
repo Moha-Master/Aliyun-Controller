@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aliyun_controller"
+version = "0.1.0"
+description = "A command-line tool for managing Alibaba Cloud services including billing queries and DNS management"
+readme = "README.md"
+authors = [
+    {name = "Moha-Master", email = "hongkongreporter@outlook.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "alibabacloud-ecs20140526",
+    "alibabacloud-bssopenapi20171214",
+    "alibabacloud-alidns20150109",
+    "InquirerPy",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+]
+
+[project.urls]
+Homepage = "https://github.com/Moha-Master/Aliyun-Controller"
+Repository = "https://github.com/Moha-Master/Aliyun-Controller"
+Issues = "https://github.com/Moha-Master/Aliyun-Controller/issues"
+
+[project.scripts]
+aliyunctl = "aliyun_controller.main:main"
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "dirty-tag"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aliyun_controller*"]
+exclude = ["tests*", "venv*"]
+
+[tool.setuptools.package-data]
+aliyun_controller = ["config.yaml.example"]
+
+[tool.setuptools.package-dir]
+"" = "."

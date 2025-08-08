@@ -1,19 +1,44 @@
 import os
-from dotenv import load_dotenv
+import yaml
+from pathlib import Path
 from alibabacloud_bssopenapi20171214.client import Client as BssOpenApi20171214Client
 from alibabacloud_bssopenapi20171214.models import DescribeInstanceBillRequest
 from alibabacloud_tea_openapi import models as open_api_models
+
+def load_config():
+    """加载配置文件"""
+    config_dir = os.environ.get('ALIYUN_CONTROLLER_CONFIG_DIR', 
+                               os.path.expanduser('~/.config/aliyun-controller'))
+    config_path = Path(config_dir) / 'config.yaml'
+    example_path = Path(config_dir) / 'config.yaml.example'
+    package_example_path = Path(__file__).parent.parent / 'config.yaml.example'
+    
+    # 检查配置目录是否存在，如果不存在则创建
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 如果示例文件不存在，则从包中复制
+    if not example_path.exists() and package_example_path.exists():
+        import shutil
+        shutil.copy(package_example_path, example_path)
+    
+    # 如果配置文件不存在，则报错退出
+    if not config_path.exists():
+        print("配置文件不存在，请参考 config.yaml.example 创建 config.yaml 文件")
+        raise FileNotFoundError(f"配置文件不存在: {config_path}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
 class AliCloudBssQuerier:
     def __init__(self):
         """
         初始化客户端
         """
-        load_dotenv()
+        config = load_config()
         self.client = BssOpenApi20171214Client(
             open_api_models.Config(
-                access_key_id=os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_ID"),
-                access_key_secret=os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
+                access_key_id=config['access_key_id'],
+                access_key_secret=config['access_key_secret'],
                 region_id="cn-hangzhou",
             )
         )

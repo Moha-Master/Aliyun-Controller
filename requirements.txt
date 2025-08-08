@@ -2,4 +2,4 @@ alibabacloud-ecs20140526
 alibabacloud-bssopenapi20171214
 alibabacloud-alidns20150109
 InquirerPy
-python-dotenv
+PyYAML

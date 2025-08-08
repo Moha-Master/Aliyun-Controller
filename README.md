@@ -1,4 +1,4 @@
-# 阿里云控制台工具
+# 阿里云控制台工具 (aliyun-controller)
 
 这是一个调用阿里云 Python SDK 在命令行中执行常用操作的简单工具，目前具有账单查询和 DNS 管理功能。
 
@@ -15,6 +15,24 @@
 
 ## 安装指南
 
+### 通过 pip 安装（推荐）
+
+可以通过 pip 直接安装：
+
+```bash
+pip install aliyun-controller
+```
+
+安装后，可以直接使用 `aliyunctl` 命令运行程序：
+
+```bash
+aliyunctl
+```
+
+### 从源码运行（开发模式）
+
+如果你希望进行二次开发或修改源码，可以从源码安装：
+
 1. 克隆此项目到本地：
    ```bash
    git clone <项目地址>
@@ -30,7 +48,7 @@
 
 3. 安装依赖：
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
    ```
 
 4. 创建阿里云 RAM 用户并授权：
@@ -45,20 +63,29 @@
     - 点击 确定 完成授权。
 
 5. 配置阿里云访问密钥：
+   默认情况下，程序会在 `~/.configs/aliyun-controller` 目录下查找配置文件。
+   你可以复制示例配置文件并修改：
    ```bash
-   cp .env.example .env
+   mkdir -p ~/.configs/aliyun-controller
+   cp config.yaml.example ~/.configs/aliyun-controller/config.yaml
    ```
-   然后编辑 `.env` 文件，填入你创建的的阿里云RAM用户的 AccessKey ID 和 AccessKey Secret：
+   然后编辑 `~/.configs/aliyun-controller/config.yaml` 文件，填入你创建的阿里云RAM用户的 AccessKey ID 和 AccessKey Secret：
+   ```yaml
+   access_key_id: your_access_key_id
+   access_key_secret: your_access_key_secret
    ```
-   ALIBABA_CLOUD_ACCESS_KEY_ID=your_access_key_id
-   ALIBABA_CLOUD_ACCESS_KEY_SECRET=your_access_key_secret
+   
+   你也可以使用 `--dir/-D` 参数指定配置文件所在的目录：
+   ```bash
+   aliyunctl -D /path/to/your/config/dir
    ```
 
 ## 使用方法
 
-运行主程序：
+安装后，可以直接使用 `aliyunctl` 命令运行程序：
+
 ```bash
-python main.py
+aliyunctl
 ```
 
 程序将显示交互式菜单，你可以选择以下功能：
@@ -66,6 +93,12 @@ python main.py
 1. **查询总流出流量**：查看指定月份的公网总流出流量
 2. **归纳账单**：查看指定月份的账单明细和总额
 3. **DNS解析管理**：管理域名解析记录
+
+你也可以使用 `--dir/-D` 参数指定配置文件所在的目录：
+
+```bash
+aliyunctl -D /path/to/your/config/dir
+```
 
 ### 账单查询
 

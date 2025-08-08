@@ -1,0 +1,5 @@
+# 阿里云访问密钥配置示例
+# 复制此文件为 config.yaml 并填入你的实际密钥
+
+access_key_id: your_access_key_id
+access_key_secret: your_access_key_secret

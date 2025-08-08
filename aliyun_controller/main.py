@@ -2,10 +2,13 @@ import datetime
 import re
 import logging
 import traceback
+import argparse
+import os
+from pathlib import Path
 from InquirerPy import prompt
 from InquirerPy.base.control import Choice
-from modules.billing import get_outbound_traffic_module, summarize_billing_module
-from modules.dns import dns_management_module
+from aliyun_controller.modules.billing import get_outbound_traffic_module, summarize_billing_module
+from aliyun_controller.modules.dns import dns_management_module
 
 # 配置日志
 logging.basicConfig(
@@ -16,6 +19,16 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="阿里云控制台工具")
+    parser.add_argument(
+        "-D", "--dir",
+        help="配置文件目录路径",
+        default=os.path.expanduser("~/.config/aliyun-controller")
+    )
+    return parser.parse_args()
 
 def _prompt_for_billing_cycle() -> str | None:
     """
@@ -111,6 +124,11 @@ def main():
     """
     主函数，提供交互式菜单
     """
+    args = parse_args()
+    
+    # 设置配置目录环境变量，供模块使用
+    os.environ['ALIYUN_CONTROLLER_CONFIG_DIR'] = args.dir
+    
     print("阿里云控制台工具")
     print("=" * 30)
     

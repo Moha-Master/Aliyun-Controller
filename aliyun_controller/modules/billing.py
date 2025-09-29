@@ -112,6 +112,7 @@ def get_outbound_traffic_module(billing_cycle: str):
 
     TRAFFIC_ITEMS_CODES = [
         "ECS_Out_Bytes",
+        "IPv6_Out_Bytes",
         "Eip_Out_Bytes",
         "Cdn_domestic_flow",
         "Cdn_overseas_flow",

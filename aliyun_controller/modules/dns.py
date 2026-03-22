@@ -274,8 +274,18 @@ def dns_management_module():
 
             while True: # 循环用于对选定域名进行操作
                 records = dns_querier.get_domain_records(selected_domain)
-                # 根据排序设置对记录进行排序
-                records = dns_querier.sort_records(records, int(sort_type), int(sort_order))
+                # 根据排序设置对记录进行排序，确保参数是整数
+                st = 0
+                so = 0
+                try:
+                    st = int(sort_type) if sort_type is not None and str(sort_type).isdigit() else 0
+                except (ValueError, TypeError):
+                    st = 0
+                try:
+                    so = int(sort_order) if sort_order is not None and str(sort_order).isdigit() else 0
+                except (ValueError, TypeError):
+                    so = 0
+                records = dns_querier.sort_records(records, st, so)
                     
                 # 构建记录选项列表
                 record_choices = []
@@ -467,22 +477,41 @@ def dns_management_module():
                             print("\n操作已取消，返回记录列表。")
                             continue
                         
-                        if not all(add_answers.get(k) for k in ['rr', 'type', 'value']):
+                        # 检查必需字段是否都存在并且非空
+                        rr_check = add_answers.get('rr')
+                        type_check = add_answers.get('type')
+                        value_check = add_answers.get('value')
+                        
+                        if not (rr_check and type_check and value_check):
                             print("\n缺少必要信息，操作取消。")
                             continue
                         
                         # TTL 是可选的，如果用户没输入，则使用默认值
-                        ttl_value = add_answers.get('ttl')
-                        if not ttl_value or not ttl_value.isdigit():
+                        ttl_raw = add_answers.get('ttl', '600')
+                        # 转换为字符串，然后提取数字部分
+                        ttl_str = str(ttl_raw) if ttl_raw is not None else "600"
+                        try:
+                            # 提取纯数字字符
+                            import re
+                            ttl_digits = ''.join(re.findall(r'\d', str(ttl_str)))
+                            if ttl_digits:
+                                ttl_value = int(ttl_digits)
+                            else:
+                                ttl_value = 600  # 默认TTL值
+                        except (TypeError, ValueError):
                             ttl_value = 600
-                        else:
-                            ttl_value = int(ttl_value)
+
+                        # 确保所有参数都是字符串类型
+                        domain_name_str = str(selected_domain) if selected_domain is not None else ""
+                        rr_str = str(rr) if rr is not None and rr != '' else ''
+                        type_str = str(type_ans_str).upper() if type_ans_str is not None and type_ans_str != '' else ''
+                        value_str = str(value) if value is not None and value != '' else ''
 
                         dns_querier.add_domain_record(
-                            domain_name=selected_domain,
-                            rr=add_answers['rr'],
-                            type=add_answers['type'].upper(),
-                            value=add_answers['value'],
+                            domain_name=domain_name_str,
+                            rr=rr_str,
+                            type=type_str,
+                            value=value_str,
                             ttl=ttl_value
                         )
                     except KeyboardInterrupt:

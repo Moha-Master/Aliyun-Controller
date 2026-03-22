@@ -10,21 +10,35 @@ from InquirerPy.base.control import Choice
 from aliyun_controller.modules.billing import get_outbound_traffic_module, summarize_billing_module
 from aliyun_controller.modules.dns import dns_management_module
 
-# 配置日志 - 只输出到控制台，不写入文件
+import logging
+
+# 设置根日志记录器的级别以抑制所有低于ERROR的消息
+logging.getLogger().setLevel(logging.ERROR)
+
+# 配置日志 - 设置为空处理器以彻底阻止输出
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()  # 只向控制台输出日志
-    ]
+    level=logging.ERROR,
+    handlers=[logging.NullHandler()]  # 使用空处理器，不实际输出任何日志
 )
 
-# 保持对第三方库日志的限制
+# 为控制台单独创建一个handler，只显示严重错误
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.CRITICAL)  # 只有CRITICAL级别的日志才会显示
+formatter = logging.Formatter('%(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+
+# 获取根logger并添加控制台处理器
+root_logger = logging.getLogger()
+root_logger.addHandler(console_handler)
+
+# 保持对第三方库日志的严格限制
 logging.getLogger('alibabacloud').setLevel(logging.CRITICAL)
 logging.getLogger('telemetry').setLevel(logging.CRITICAL)
 logging.getLogger('concurrent').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logging.getLogger('requests').setLevel(logging.CRITICAL)
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
+logging.getLogger('InquirerPy').setLevel(logging.CRITICAL)  # 特别添加对InquirerPy的限制
 
 def parse_args():
     """解析命令行参数"""

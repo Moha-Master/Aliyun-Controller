@@ -107,84 +107,92 @@ def get_outbound_traffic_module(billing_cycle: str):
     """
     流量查询模块
     """
-    querier = AliCloudBssQuerier()
-    total_usage_bytes = 0.0
+    try:
+        querier = AliCloudBssQuerier()
+        total_usage_bytes = 0.0
 
-    TRAFFIC_ITEMS_CODES = [
-        "ECS_Out_Bytes",
-        "IPv6_Out_Bytes",
-        "Eip_Out_Bytes",
-        "Cdn_domestic_flow",
-        "Cdn_overseas_flow",
-        "OSS_Out_Traffic",
-    ]
+        TRAFFIC_ITEMS_CODES = [
+            "ECS_Out_Bytes",
+            "IPv6_Out_Bytes",
+            "Eip_Out_Bytes",
+            "Cdn_domestic_flow",
+            "Cdn_overseas_flow",
+            "OSS_Out_Traffic",
+        ]
 
-    print(f"\n正在查询账单周期 {billing_cycle} 的账单明细...")
-    
-    all_items = querier.fetch_all_bill_details(billing_cycle)
-    
-    if not all_items:
-        print("未发现任何账单明细。")
+        print(f"\n正在查询账单周期 {billing_cycle} 的账单明细...")
+        
+        all_items = querier.fetch_all_bill_details(billing_cycle)
+        
+        if not all_items:
+            print("未发现任何账单明细。")
+            return
+
+        print("账单明细获取成功，开始计算总流量...")
+        for item in all_items:
+            if item.get('BillingItemCode') in TRAFFIC_ITEMS_CODES:
+                usage_str = item.get('Usage')
+                unit = (item.get('UsageUnit') or '').upper()
+                if usage_str:
+                    try:
+                        usage = float(usage_str)
+                        if usage > 0:
+                            usage_bytes = querier.convert_usage_to_bytes(usage, unit)
+                            total_usage_bytes += usage_bytes
+                    except ValueError:
+                        continue
+        
+        total_traffic_gb = total_usage_bytes / (1024 * 1024 * 1024)
+        print("\n" + "="*45)
+        print(f"账单周期 {billing_cycle} 的总公网流出流量: {total_traffic_gb:.4f} GB")
+        print("="*45)
+    except KeyboardInterrupt:
+        print("\n操作被取消，返回上级菜单。")
         return
-
-    print("账单明细获取成功，开始计算总流量...")
-    for item in all_items:
-        if item.get('BillingItemCode') in TRAFFIC_ITEMS_CODES:
-            usage_str = item.get('Usage')
-            unit = (item.get('UsageUnit') or '').upper()
-            if usage_str:
-                try:
-                    usage = float(usage_str)
-                    if usage > 0:
-                        usage_bytes = querier.convert_usage_to_bytes(usage, unit)
-                        total_usage_bytes += usage_bytes
-                except ValueError:
-                    continue
-    
-    total_traffic_gb = total_usage_bytes / (1024 * 1024 * 1024)
-    print("\n" + "="*45)
-    print(f"账单周期 {billing_cycle} 的总公网流出流量: {total_traffic_gb:.4f} GB")
-    print("="*45)
 
 def summarize_billing_module(billing_cycle: str):
     """
     当月完整账单归纳模块
     """
-    querier = AliCloudBssQuerier()
-    summary = {}
+    try:
+        querier = AliCloudBssQuerier()
+        summary = {}
 
-    print(f"\n正在获取账单周期 {billing_cycle} 的所有账单明细...")
-    all_items = querier.fetch_all_bill_details(billing_cycle)
+        print(f"\n正在获取账单周期 {billing_cycle} 的所有账单明细...")
+        all_items = querier.fetch_all_bill_details(billing_cycle)
 
-    if not all_items:
-        print("未发现任何账单明细。")
+        if not all_items:
+            print("未发现任何账单明细。")
+            return
+
+        for item in all_items:
+            product_code = item.get('ProductCode', 'Unknown')
+            product_name = item.get('ProductName', 'Unknown')
+            amount = float(item.get('PretaxAmount', 0.0))
+            if product_code not in summary:
+                summary[product_code] = {'product_name': product_name, 'total_amount': 0.0, 'count': 0}
+            summary[product_code]['product_name'] = product_name  # 更新产品名称（同一产品代码可能有多个名称，取最后一个）
+            summary[product_code]['total_amount'] += amount
+            summary[product_code]['count'] += 1
+
+        # 按金额从大到小排序
+        sorted_summary = sorted(summary.items(), key=lambda x: x[1]['total_amount'], reverse=True)
+
+        print("\n" + "="*70)
+        print(f"账单周期 {billing_cycle} 消费归纳".center(70))
+        print("="*70)
+        print(f"{'产品名称':<25} {'产品代码':<15} {'账单条数':<10} {'总金额 (元)':<15}")
+        print("-"*70)
+        
+        total_amount = 0.0
+        for product_code, data in sorted_summary:
+            total_amount += data['total_amount']
+            product_name = data['product_name'][:24]  # 截断过长的产品名称
+            print(f"{product_name:<25} {product_code:<15} {data['count']:<10} {data['total_amount']:<15.2f}")
+
+        print("-"*70)
+        print(f"总计: {total_amount:.2f} 元".rjust(70))
+        print("="*70)
+    except KeyboardInterrupt:
+        print("\n操作被取消，返回上级菜单。")
         return
-
-    for item in all_items:
-        product_code = item.get('ProductCode', 'Unknown')
-        product_name = item.get('ProductName', 'Unknown')
-        amount = float(item.get('PretaxAmount', 0.0))
-        if product_code not in summary:
-            summary[product_code] = {'product_name': product_name, 'total_amount': 0.0, 'count': 0}
-        summary[product_code]['product_name'] = product_name  # 更新产品名称（同一产品代码可能有多个名称，取最后一个）
-        summary[product_code]['total_amount'] += amount
-        summary[product_code]['count'] += 1
-
-    # 按金额从大到小排序
-    sorted_summary = sorted(summary.items(), key=lambda x: x[1]['total_amount'], reverse=True)
-
-    print("\n" + "="*70)
-    print(f"账单周期 {billing_cycle} 消费归纳".center(70))
-    print("="*70)
-    print(f"{'产品名称':<25} {'产品代码':<15} {'账单条数':<10} {'总金额 (元)':<15}")
-    print("-"*70)
-    
-    total_amount = 0.0
-    for product_code, data in sorted_summary:
-        total_amount += data['total_amount']
-        product_name = data['product_name'][:24]  # 截断过长的产品名称
-        print(f"{product_name:<25} {product_code:<15} {data['count']:<10} {data['total_amount']:<15.2f}")
-
-    print("-"*70)
-    print(f"总计: {total_amount:.2f} 元".rjust(70))
-    print("="*70)

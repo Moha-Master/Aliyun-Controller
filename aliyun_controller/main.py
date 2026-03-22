@@ -5,20 +5,26 @@ import traceback
 import argparse
 import os
 from pathlib import Path
-from InquirerPy import prompt
+from InquirerPy.resolver import prompt
 from InquirerPy.base.control import Choice
 from aliyun_controller.modules.billing import get_outbound_traffic_module, summarize_billing_module
 from aliyun_controller.modules.dns import dns_management_module
 
-# 配置日志
+# 配置日志 - 只输出到控制台，不写入文件
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("app.log", encoding='utf-8'),
-        logging.StreamHandler()
+        logging.StreamHandler()  # 只向控制台输出日志
     ]
 )
+
+# 保持对第三方库日志的限制
+logging.getLogger('alibabacloud').setLevel(logging.CRITICAL)
+logging.getLogger('telemetry').setLevel(logging.CRITICAL)
+logging.getLogger('concurrent').setLevel(logging.CRITICAL)
+logging.getLogger('urllib3').setLevel(logging.CRITICAL)
+logging.getLogger('requests').setLevel(logging.CRITICAL)
 
 def parse_args():
     """解析命令行参数"""
@@ -51,11 +57,15 @@ def _prompt_for_billing_cycle() -> str | None:
             return None
         
         cycle = answer.get("cycle")
+        if not cycle or not isinstance(cycle, str):  # 如果没有收到cycle输入或者不是字符串
+            return None
+            
         year, month = cycle.split('-')
         if len(month) == 1:
             month = '0' + month
         return f"{year}-{month}"
     except KeyboardInterrupt:
+        print("\n已取消输入，返回上级菜单。")
         return None
     except Exception as e:
         logging.error(f"输入月份时发生错误: {e}")
@@ -72,6 +82,9 @@ def query_and_repeat(query_function):
     print(f"\n--- 正在查询默认月份 {current_cycle} 的账单 ---")
     try:
         query_function(current_cycle)
+    except KeyboardInterrupt:
+        print("\n操作被取消，返回主菜单。")
+        return
     except Exception as e:
         logging.error(f"查询账单时发生错误: {e}")
         logging.debug(traceback.format_exc())
@@ -104,6 +117,8 @@ def query_and_repeat(query_function):
                     print(f"\n--- 正在查询 {new_cycle} 的账单 ---")
                     try:
                         query_function(new_cycle)
+                    except KeyboardInterrupt:
+                        print("\n操作被取消，返回上级菜单。")
                     except Exception as e:
                         logging.error(f"查询账单时发生错误: {e}")
                         logging.debug(traceback.format_exc())
@@ -114,6 +129,9 @@ def query_and_repeat(query_function):
             elif action == "return":
                 print("\n已返回主菜单。")
                 break
+        except KeyboardInterrupt:
+            print("\n操作被取消，返回主菜单。")
+            break
         except Exception as e:
             logging.error(f"执行操作时发生错误: {e}")
             logging.debug(traceback.format_exc())
@@ -162,6 +180,8 @@ def main():
             elif action == "manage_dns":
                 try:
                     dns_management_module()
+                except KeyboardInterrupt:
+                    print("\n操作被取消，返回主菜单。")
                 except Exception as e:
                     logging.error(f"DNS管理模块发生错误: {e}")
                     logging.debug(traceback.format_exc())
@@ -169,6 +189,9 @@ def main():
             elif action is None:
                 print("已退出。")
                 break
+        except KeyboardInterrupt:
+            print("\n\n检测到中断，程序已退出。")
+            break
         except Exception as e:
             logging.error(f"主菜单执行时发生错误: {e}")
             logging.debug(traceback.format_exc())

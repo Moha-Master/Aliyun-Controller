@@ -503,9 +503,9 @@ def dns_management_module():
 
                         # 确保所有参数都是字符串类型
                         domain_name_str = str(selected_domain) if selected_domain is not None else ""
-                        rr_str = str(rr) if rr is not None and rr != '' else ''
-                        type_str = str(type_ans_str).upper() if type_ans_str is not None and type_ans_str != '' else ''
-                        value_str = str(value) if value is not None and value != '' else ''
+                        rr_str = str(rr_check) if rr_check is not None and str(rr_check) != '' else ''
+                        type_str = str(type_check).upper() if type_check is not None and str(type_check) != '' else ''
+                        value_str = str(value_check) if value_check is not None and str(value_check) != '' else ''
 
                         dns_querier.add_domain_record(
                             domain_name=domain_name_str,
@@ -516,6 +516,9 @@ def dns_management_module():
                         )
                     except KeyboardInterrupt:
                         print("\n操作被取消，返回记录列表。")
+                        continue
+                    except Exception as e:
+                        print(f"\n添加解析记录时出错: {e}")
                         continue
 
                 elif dns_action == "sort":

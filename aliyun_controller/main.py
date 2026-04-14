@@ -82,8 +82,8 @@ def _prompt_for_billing_cycle() -> str | None:
         print("\n已取消输入，返回上级菜单。")
         return None
     except Exception as e:
-        logging.error(f"输入月份时发生错误: {e}")
-        logging.debug(traceback.format_exc())
+        print(f"\n输入月份时发生错误: {e}")
+        print(f"详细错误信息:\n{traceback.format_exc()}")
         return None
 
 def query_and_repeat(query_function):
@@ -100,9 +100,8 @@ def query_and_repeat(query_function):
         print("\n操作被取消，返回主菜单。")
         return
     except Exception as e:
-        logging.error(f"查询账单时发生错误: {e}")
-        logging.debug(traceback.format_exc())
-        print(f"\n查询账单时发生错误，请查看日志了解详情。")
+        print(f"\n查询账单时发生错误: {e}")
+        print(f"详细错误信息:\n{traceback.format_exc()}")
 
     # 2. 进入子菜单循环
     while True:
@@ -134,9 +133,8 @@ def query_and_repeat(query_function):
                     except KeyboardInterrupt:
                         print("\n操作被取消，返回上级菜单。")
                     except Exception as e:
-                        logging.error(f"查询账单时发生错误: {e}")
-                        logging.debug(traceback.format_exc())
-                        print(f"\n查询账单时发生错误，请查看日志了解详情。")
+                        print(f"\n查询账单时发生错误: {e}")
+                        print(f"详细错误信息:\n{traceback.format_exc()}")
                 else:
                     print("\n输入已取消。")
                     continue # 重新显示子菜单
@@ -147,9 +145,8 @@ def query_and_repeat(query_function):
             print("\n操作被取消，返回主菜单。")
             break
         except Exception as e:
-            logging.error(f"执行操作时发生错误: {e}")
-            logging.debug(traceback.format_exc())
-            print(f"\n执行操作时发生错误，请查看日志了解详情。")
+            print(f"\n执行操作时发生错误: {e}")
+            print(f"详细错误信息:\n{traceback.format_exc()}")
             continue
 
 def main():
@@ -197,9 +194,8 @@ def main():
                 except KeyboardInterrupt:
                     print("\n操作被取消，返回主菜单。")
                 except Exception as e:
-                    logging.error(f"DNS管理模块发生错误: {e}")
-                    logging.debug(traceback.format_exc())
-                    print(f"\nDNS管理模块发生错误，请查看日志了解详情。")
+                    print(f"\nDNS管理模块发生错误: {e}")
+                    print(f"详细错误信息:\n{traceback.format_exc()}")
             elif action is None:
                 print("已退出。")
                 break
@@ -207,9 +203,8 @@ def main():
             print("\n\n检测到中断，程序已退出。")
             break
         except Exception as e:
-            logging.error(f"主菜单执行时发生错误: {e}")
-            logging.debug(traceback.format_exc())
-            print(f"\n执行操作时发生错误，请查看日志了解详情。")
+            print(f"\n执行操作时发生错误: {e}")
+            print(f"详细错误信息:\n{traceback.format_exc()}")
             continue
 
 if __name__ == "__main__":
@@ -218,6 +213,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\n检测到中断，程序已退出。")
     except Exception as e:
-        logging.error(f"程序运行时发生未处理的错误: {e}")
-        logging.debug(traceback.format_exc())
-        print(f"\n程序运行时发生未处理的错误，请查看日志了解详情。")
+        print(f"\n程序运行时发生未处理的错误: {e}")
+        print(f"详细错误信息:\n{traceback.format_exc()}")

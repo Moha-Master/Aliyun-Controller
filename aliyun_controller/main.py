@@ -4,13 +4,11 @@ import logging
 import traceback
 import argparse
 import os
-from pathlib import Path
 from InquirerPy.resolver import prompt
 from InquirerPy.base.control import Choice
 from aliyun_controller.modules.billing import get_outbound_traffic_module, summarize_billing_module
 from aliyun_controller.modules.dns import dns_management_module
-
-import logging
+from aliyun_controller.config import ensure_config_ready
 
 # 设置根日志记录器的级别以抑制所有低于ERROR的消息
 logging.getLogger().setLevel(logging.ERROR)
@@ -157,6 +155,10 @@ def main():
     
     # 设置配置目录环境变量，供模块使用
     os.environ['ALIYUN_CONTROLLER_CONFIG_DIR'] = args.dir
+
+    if not ensure_config_ready():
+        print("未完成配置，程序退出。")
+        return
     
     print("阿里云控制台工具")
     print("=" * 30)

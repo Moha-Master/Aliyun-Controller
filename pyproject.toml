@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aliyun_controller"
-version = "0.1.4"
+version = "0.1.5"
 description = "A command-line tool for managing Alibaba Cloud services including billing queries and DNS management"
 readme = "README.md"
 authors = [
@@ -52,9 +52,6 @@ local_scheme = "dirty-tag"
 where = ["."]
 include = ["aliyun_controller*"]
 exclude = ["tests*", "venv*"]
-
-[tool.setuptools.package-data]
-aliyun_controller = ["config.yaml.example"]
 
 [tool.setuptools.package-dir]
 "" = "."

@@ -63,18 +63,13 @@ aliyunctl
     - 点击 确定 完成授权。
 
 5. 配置阿里云访问密钥：
-   默认情况下，程序会在 `~/.configs/aliyun-controller` 目录下查找配置文件。
-   你可以复制示例配置文件并修改：
-   ```bash
-   mkdir -p ~/.configs/aliyun-controller
-   cp config.yaml.example ~/.configs/aliyun-controller/config.yaml
-   ```
-   然后编辑 `~/.configs/aliyun-controller/config.yaml` 文件，填入你创建的阿里云RAM用户的 AccessKey ID 和 AccessKey Secret：
-   ```yaml
-   access_key_id: your_access_key_id
-   access_key_secret: your_access_key_secret
-   ```
-   
+   默认情况下，程序会在 `~/.config/aliyun-controller` 目录下查找配置文件。
+   首次运行或配置文件不存在时，程序会自动进入交互式配置流程，依次提示输入：
+   - `access_key_id`
+   - `access_key_secret`
+
+   填写完成后会自动生成 `config.yaml`。
+
    你也可以使用 `--dir/-D` 参数指定配置文件所在的目录：
    ```bash
    aliyunctl -D /path/to/your/config/dir

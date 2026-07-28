@@ -265,7 +265,10 @@ def dns_management_module():
                 record_choices = []
                 if records:
                     for i, record in enumerate(records):
-                        record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {record.get('Value'):<30} {record.get('TTL')}"
+                        value = record.get('Value', '')
+                        if len(value) > 25:
+                            value = value[:25] + '…'
+                        record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {value:<30} {record.get('TTL')}"
                         record_choices.append(Choice(value=i, name=record_name))
                     
                     # 添加分隔线（不可选择）

@@ -324,7 +324,7 @@ def dns_management_module():
                     break # 退出操作循环，返回域名选择
 
                 dns_action = action_result.get("dns_action")
-                if not dns_action: # 用户选择 [返回域名选择]
+                if dns_action is None: # 用户选择 [返回域名选择]
                     break
 
                 # 处理记录选择

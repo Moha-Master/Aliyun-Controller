@@ -122,6 +122,24 @@ class AliCloudDnsQuerier:
             print(f"\n删除解析记录时出错: {e}")
             return False
 
+    def set_domain_record_status(self, record_id: str, status: str) -> bool:
+        """
+        启用或禁用解析记录
+        :param status: "Enable" 或 "Disable"
+        """
+        request = alidns_20150109_models.SetDomainRecordStatusRequest(
+            record_id=record_id,
+            status=status,
+        )
+        try:
+            self.client.set_domain_record_status(request)
+            status_text = "启用" if status == "Enable" else "禁用"
+            print(f"\n成功{status_text}解析记录 (ID: {record_id})")
+            return True
+        except Exception as e:
+            print(f"\n设置解析记录状态时出错: {e}")
+            return False
+
     def _validate_dns_record(self, rr: str, type: str, value: str, ttl: int) -> bool:
         """
         验证DNS记录参数的合法性
@@ -268,7 +286,10 @@ def dns_management_module():
                         value = record.get('Value', '')
                         if len(value) > 25:
                             value = value[:25] + '…'
-                        record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {value:<30} {record.get('TTL')}"
+                        status_raw = record.get('Status') or record.get('status') or ''
+                        is_enabled = status_raw.lower() == 'enable'
+                        status_tag = '🟢' if is_enabled else '🔴'
+                        record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {value:<30} {record.get('TTL'):<8} {status_tag}"
                         record_choices.append(Choice(value=i, name=record_name))
                     
                     # 添加分隔线（不可选择）
@@ -306,7 +327,7 @@ def dns_management_module():
                         }
                     ]
                 else:
-                    print(f"{'主机记录(RR)':<20} {'类型':<10} {'记录值(Value)':<30} {'TTL'}")
+                    print(f"{'主机记录(RR)':<20} {'类型':<10} {'记录值(Value)':<30} {'TTL':<8} {'状态'}")
                     print("--------------------------------------------------------------------------------")
                     action_questions = [
                         {
@@ -337,7 +358,10 @@ def dns_management_module():
                     0 <= dns_action < len(records)):
                     selected_record = records[dns_action]
                     
-                    # 为选中的记录提供编辑/删除选项
+                    # 为选中的记录提供编辑/删除/启用禁用选项
+                    current_status_raw = selected_record.get('Status') or selected_record.get('status') or ''
+                    current_status = current_status_raw.lower()
+                    toggle_text = "禁用解析" if current_status == 'enable' else "启用解析"
                     try:
                         record_action_questions = [
                             {
@@ -345,6 +369,7 @@ def dns_management_module():
                                 "message": f"对记录 {selected_record.get('RR')}.{selected_domain} ({selected_record.get('Type')}: {selected_record.get('Value')}) 执行操作:",
                                 "choices": [
                                     Choice("edit", "编辑记录"),
+                                    Choice("toggle", toggle_text),
                                     Choice("delete", "删除记录"),
                                     Choice(value=None, name="[取消]")
                                 ],
@@ -433,6 +458,36 @@ def dns_management_module():
                                 dns_querier.delete_domain_record(selected_record.get('RecordId'))
                             else:
                                 print("删除操作已取消。")
+                        except KeyboardInterrupt:
+                            print("\n操作被取消，返回记录列表。")
+                            continue
+
+                    elif record_action == "toggle":
+                        current_status_raw = selected_record.get('Status') or selected_record.get('status') or ''
+                        current_status = current_status_raw.lower()
+                        new_status = "Disable" if current_status == "enable" else "Enable"
+                        status_text = "禁用" if new_status == "Disable" else "启用"
+                        full_record_name = f"{selected_record.get('RR')}.{selected_domain}"
+                        try:
+                            confirmation_question = [
+                                {
+                                    "type": "confirm",
+                                    "message": f"确定要{status_text}解析记录 {full_record_name} 吗?",
+                                    "default": True,
+                                    "name": "confirm_toggle",
+                                }
+                            ]
+                            confirmation_result = prompt(confirmation_question)
+                            if not confirmation_result:
+                                print("\n操作已取消，返回记录列表。")
+                                continue
+
+                            if confirmation_result.get("confirm_toggle"):
+                                dns_querier.set_domain_record_status(
+                                    selected_record.get('RecordId'), new_status
+                                )
+                            else:
+                                print(f"{status_text}操作已取消。")
                         except KeyboardInterrupt:
                             print("\n操作被取消，返回记录列表。")
                             continue

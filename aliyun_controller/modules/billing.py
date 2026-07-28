@@ -83,16 +83,15 @@ def get_outbound_traffic_module(billing_cycle: str):
     """
     try:
         querier = AliCloudBssQuerier()
-        total_usage_bytes = 0.0
 
-        TRAFFIC_ITEMS_CODES = [
+        IPV4_TRAFFIC_CODES = [
             "ECS_Out_Bytes",
-            "IPv6_Out_Bytes",
             "Eip_Out_Bytes",
             "Cdn_domestic_flow",
             "Cdn_overseas_flow",
             "OSS_Out_Traffic",
         ]
+        IPV6_TRAFFIC_CODES = ["IPv6_Out_Bytes"]
 
         print(f"\n正在查询账单周期 {billing_cycle} 的账单明细...")
         
@@ -102,23 +101,40 @@ def get_outbound_traffic_module(billing_cycle: str):
             print("未发现任何账单明细。")
             return
 
-        print("账单明细获取成功，开始计算总流量...")
+        print("账单明细获取成功，开始计算流量...")
+        ipv4_usage_bytes = 0.0
+        ipv6_usage_bytes = 0.0
+
         for item in all_items:
-            if item.get('BillingItemCode') in TRAFFIC_ITEMS_CODES:
-                usage_str = item.get('Usage')
-                unit = (item.get('UsageUnit') or '').upper()
-                if usage_str:
-                    try:
-                        usage = float(usage_str)
-                        if usage > 0:
-                            usage_bytes = querier.convert_usage_to_bytes(usage, unit)
-                            total_usage_bytes += usage_bytes
-                    except ValueError:
-                        continue
-        
+            billing_code = item.get('BillingItemCode')
+            usage_str = item.get('Usage')
+            unit = (item.get('UsageUnit') or '').upper()
+            if not usage_str:
+                continue
+            try:
+                usage = float(usage_str)
+            except ValueError:
+                continue
+            if usage <= 0:
+                continue
+            usage_bytes = querier.convert_usage_to_bytes(usage, unit)
+            if billing_code in IPV4_TRAFFIC_CODES:
+                ipv4_usage_bytes += usage_bytes
+            elif billing_code in IPV6_TRAFFIC_CODES:
+                ipv6_usage_bytes += usage_bytes
+
+        total_usage_bytes = ipv4_usage_bytes + ipv6_usage_bytes
+        ipv4_traffic_gb = ipv4_usage_bytes / (1024 * 1024 * 1024)
+        ipv6_traffic_gb = ipv6_usage_bytes / (1024 * 1024 * 1024)
         total_traffic_gb = total_usage_bytes / (1024 * 1024 * 1024)
+
         print("\n" + "="*45)
-        print(f"账单周期 {billing_cycle} 的总公网流出流量: {total_traffic_gb:.4f} GB")
+        print(f"账单周期 {billing_cycle} 公网流出流量")
+        print("="*45)
+        print(f"  IPv4 流出流量: {ipv4_traffic_gb:.4f} GB")
+        print(f"  IPv6 流出流量: {ipv6_traffic_gb:.4f} GB")
+        print(f"  ─────────────────────")
+        print(f"  总流出流量:     {total_traffic_gb:.4f} GB")
         print("="*45)
     except KeyboardInterrupt:
         print("\n操作被取消，返回上级菜单。")

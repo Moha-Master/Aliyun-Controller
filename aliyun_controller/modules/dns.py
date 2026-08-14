@@ -283,13 +283,16 @@ def dns_management_module():
                 record_choices = []
                 if records:
                     for i, record in enumerate(records):
+                        rr = record.get('RR', '')
+                        if len(rr) > 20:
+                            rr = rr[:20] + '…'
                         value = record.get('Value', '')
                         if len(value) > 25:
                             value = value[:25] + '…'
                         status_raw = record.get('Status') or record.get('status') or ''
                         is_enabled = status_raw.lower() == 'enable'
                         status_tag = '🟢' if is_enabled else '🔴'
-                        record_name = f"{record.get('RR'):<20} {record.get('Type'):<10} {value:<30} {record.get('TTL'):<8} {status_tag}"
+                        record_name = f"{rr:<20} {record.get('Type'):<10} {value:<30} {record.get('TTL'):<8} {status_tag}"
                         record_choices.append(Choice(value=i, name=record_name))
                     
                     # 添加分隔线（不可选择）
@@ -362,11 +365,17 @@ def dns_management_module():
                     current_status_raw = selected_record.get('Status') or selected_record.get('status') or ''
                     current_status = current_status_raw.lower()
                     toggle_text = "禁用解析" if current_status == 'enable' else "启用解析"
+                    display_rr = selected_record.get('RR', '')
+                    if len(display_rr) > 20:
+                        display_rr = display_rr[:20] + '…'
+                    display_value = selected_record.get('Value', '')
+                    if len(display_value) > 25:
+                        display_value = display_value[:25] + '…'
                     try:
                         record_action_questions = [
                             {
                                 "type": "list",
-                                "message": f"对记录 {selected_record.get('RR')}.{selected_domain} ({selected_record.get('Type')}: {selected_record.get('Value')}) 执行操作:",
+                                "message": f"对记录 {display_rr}.{selected_domain} ({selected_record.get('Type')}: {display_value}) 执行操作:",
                                 "choices": [
                                     Choice("edit", "编辑记录"),
                                     Choice("toggle", toggle_text),
@@ -439,12 +448,12 @@ def dns_management_module():
                             continue
 
                     elif record_action == "delete":
-                        full_record_name = f"{selected_record.get('RR')}.{selected_domain}"
+                        full_record_name = f"{display_rr}.{selected_domain}"
                         try:
                             confirmation_question = [
                                 {
                                     "type": "confirm",
-                                    "message": f"确定要删除解析记录 {full_record_name} (类型: {selected_record.get('Type')}, 值: {selected_record.get('Value')}) 吗?",
+                                    "message": f"确定要删除解析记录 {full_record_name} (类型: {selected_record.get('Type')}, 值: {display_value}) 吗?",
                                     "default": False,
                                     "name": "confirm_delete",
                                 }
@@ -467,7 +476,7 @@ def dns_management_module():
                         current_status = current_status_raw.lower()
                         new_status = "Disable" if current_status == "enable" else "Enable"
                         status_text = "禁用" if new_status == "Disable" else "启用"
-                        full_record_name = f"{selected_record.get('RR')}.{selected_domain}"
+                        full_record_name = f"{display_rr}.{selected_domain}"
                         try:
                             confirmation_question = [
                                 {

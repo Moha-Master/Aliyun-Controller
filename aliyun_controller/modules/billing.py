@@ -178,7 +178,8 @@ def summarize_billing_module(billing_cycle: str):
         for product_code, data in sorted_summary:
             total_amount += data['total_amount']
             product_name = data['product_name'][:24]  # 截断过长的产品名称
-            print(f"{product_name:<25} {product_code:<15} {data['count']:<10} {data['total_amount']:<15.2f}")
+            product_code_display = product_code[:14]  # 截断过长的产品代码
+            print(f"{product_name:<25} {product_code_display:<15} {data['count']:<10} {data['total_amount']:<15.2f}")
 
         print("-"*70)
         print(f"总计: {total_amount:.2f} 元".rjust(70))

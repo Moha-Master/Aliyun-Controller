@@ -6,6 +6,17 @@ from alibabacloud_alidns20150109.client import Client as Alidns20150109Client
 from alibabacloud_alidns20150109 import models as alidns_20150109_models
 from aliyun_controller.config import load_config
 
+def _format_api_error(e, operation: str) -> str:
+    """
+    格式化阿里云 API 错误信息
+    """
+    data = getattr(e, 'data', None) or {}
+    code = data.get('Code') or getattr(e, 'code', 'Unknown')
+    message = data.get('Message', str(e))
+    status_code = data.get('statusCode', '')
+    status_part = f" (HTTP {status_code})" if status_code else ""
+    return f"{operation}时出错: {code}{status_part}\n{message}"
+
 class AliCloudDnsQuerier:
     def __init__(self):
         """
@@ -29,7 +40,7 @@ class AliCloudDnsQuerier:
             response = self.client.describe_domains(request)
             return response.body.to_map().get('Domains', {}).get('Domain', [])
         except Exception as e:
-            print(f"\n获取域名列表时出错: {e}")
+            print(f"\n{_format_api_error(e, '获取域名列表')}")
             return []
 
     def get_domain_records(self, domain_name: str) -> list:
@@ -58,7 +69,7 @@ class AliCloudDnsQuerier:
                 page_number += 1
             return all_records
         except Exception as e:
-            print(f"\n获取域名 {domain_name} 的解析记录时出错: {e}")
+            print(f"\n{_format_api_error(e, f'获取域名 {domain_name} 的解析记录')}")
             return []
 
     def add_domain_record(self, domain_name: str, rr: str, type: str, value: str, ttl: int = 600) -> bool:
@@ -81,7 +92,7 @@ class AliCloudDnsQuerier:
             print(f"\n成功添加解析记录: {rr}.{domain_name} -> {value}")
             return True
         except Exception as e:
-            print(f"\n添加解析记录时出错: {e}")
+            print(f"\n{_format_api_error(e, '添加解析记录')}")
             return False
 
     def update_domain_record(self, record_id: str, rr: str, type: str, value: str, ttl: int = 600) -> bool:
@@ -104,7 +115,7 @@ class AliCloudDnsQuerier:
             print(f"\n成功更新解析记录 (ID: {record_id})")
             return True
         except Exception as e:
-            print(f"\n更新解析记录时出错: {e}")
+            print(f"\n{_format_api_error(e, '更新解析记录')}")
             return False
 
     def delete_domain_record(self, record_id: str) -> bool:
@@ -119,7 +130,7 @@ class AliCloudDnsQuerier:
             print(f"\n成功删除解析记录 (ID: {record_id})")
             return True
         except Exception as e:
-            print(f"\n删除解析记录时出错: {e}")
+            print(f"\n{_format_api_error(e, '删除解析记录')}")
             return False
 
     def set_domain_record_status(self, record_id: str, status: str) -> bool:
@@ -137,7 +148,7 @@ class AliCloudDnsQuerier:
             print(f"\n成功{status_text}解析记录 (ID: {record_id})")
             return True
         except Exception as e:
-            print(f"\n设置解析记录状态时出错: {e}")
+            print(f"\n{_format_api_error(e, '设置解析记录状态')}")
             return False
 
     def _validate_dns_record(self, rr: str, type: str, value: str, ttl: int) -> bool:
@@ -284,11 +295,11 @@ def dns_management_module():
                 if records:
                     for i, record in enumerate(records):
                         rr = record.get('RR', '')
-                        if len(rr) > 20:
-                            rr = rr[:20] + '…'
+                        if len(rr) > 18:
+                            rr = rr[:18] + '…'
                         value = record.get('Value', '')
-                        if len(value) > 25:
-                            value = value[:25] + '…'
+                        if len(value) > 23:
+                            value = value[:23] + '…'
                         status_raw = record.get('Status') or record.get('status') or ''
                         is_enabled = status_raw.lower() == 'enable'
                         status_tag = '🟢' if is_enabled else '🔴'
@@ -366,11 +377,11 @@ def dns_management_module():
                     current_status = current_status_raw.lower()
                     toggle_text = "禁用解析" if current_status == 'enable' else "启用解析"
                     display_rr = selected_record.get('RR', '')
-                    if len(display_rr) > 20:
-                        display_rr = display_rr[:20] + '…'
+                    if len(display_rr) > 18:
+                        display_rr = display_rr[:18] + '…'
                     display_value = selected_record.get('Value', '')
-                    if len(display_value) > 25:
-                        display_value = display_value[:25] + '…'
+                    if len(display_value) > 23:
+                        display_value = display_value[:23] + '…'
                     try:
                         record_action_questions = [
                             {
@@ -559,7 +570,7 @@ def dns_management_module():
                         print("\n操作被取消，返回记录列表。")
                         continue
                     except Exception as e:
-                        print(f"\n添加解析记录时出错: {e}")
+                        print(f"\n{_format_api_error(e, '添加解析记录')}")
                         continue
 
                 elif dns_action == "sort":

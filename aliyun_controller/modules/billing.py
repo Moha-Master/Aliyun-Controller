@@ -3,6 +3,17 @@ from alibabacloud_bssopenapi20171214.models import DescribeInstanceBillRequest
 from alibabacloud_tea_openapi import models as open_api_models
 from aliyun_controller.config import load_config
 
+def _format_api_error(e, operation: str) -> str:
+    """
+    格式化阿里云 API 错误信息
+    """
+    data = getattr(e, 'data', None) or {}
+    code = data.get('Code') or getattr(e, 'code', 'Unknown')
+    message = data.get('Message', str(e))
+    status_code = data.get('statusCode', '')
+    status_part = f" (HTTP {status_code})" if status_code else ""
+    return f"{operation}时出错: {code}{status_part}\n{message}"
+
 class AliCloudBssQuerier:
     def __init__(self):
         """
@@ -51,7 +62,7 @@ class AliCloudBssQuerier:
             return all_items
 
         except Exception as e:
-            print(f"\n查询 [{subscription_type}] 类型账单时出错: {e}")
+            print(f"\n{_format_api_error(e, f'查询 [{subscription_type}] 类型账单')}")
             return []
 
     def fetch_all_bill_details(self, billing_cycle: str) -> list:

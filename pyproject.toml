@@ -38,7 +38,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/Moha-Master/Aliyun-Controller"
-Repository = "https://github.com/Moha-Master/Aliyun-Controller"
+Repository = "https://github.com/Moha-Master/Aliyun-Controller.git"
+GitHub = "https://github.com/Moha-Master/Aliyun-Controller"
 Issues = "https://github.com/Moha-Master/Aliyun-Controller/issues"
 
 [project.scripts]

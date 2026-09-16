@@ -1,0 +1,232 @@
+/* app.tcss — Aliyun Controller TUI 样式 */
+
+Screen {
+    background: $surface;
+}
+
+/* ---------- 模态三段式：标题栏 / 内容 / 按钮栏 ---------- */
+.modal-box {
+    layout: vertical;
+    height: auto;
+    max-height: 90%;
+    border: round $primary;
+    background: $surface;
+    padding: 0;
+}
+
+.modal-title {
+    height: auto;
+    padding: 0 2;
+    border-bottom: hkey $secondary;
+    content-align: left middle;
+}
+
+.modal-main {
+    height: auto;
+    padding: 1 2;
+}
+
+.btn-row {
+    height: auto;
+    padding: 0 2;
+    border-top: hkey $secondary;
+    align-horizontal: right;
+    dock: bottom;
+}
+
+.btn-row Button {
+    margin-left: 2;
+}
+
+/* ---------- 页面公共 ---------- */
+.page-hint {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+.sub-toolbar {
+    height: auto;
+    margin: 1 1 0 1;
+    layout: horizontal;
+}
+
+.sub-toolbar Select {
+    margin-right: 2;
+}
+
+.sub-toolbar .tb-note {
+    width: auto;
+    color: $text-muted;
+    margin-right: 1;
+    content-align: left middle;
+}
+
+/* ---------- 内容区小容器（筛选 / 排序 / 主操作按钮） ---------- */
+.filter-row {
+    height: auto;
+    layout: horizontal;
+}
+
+.filter-row.gap-top {
+    margin-top: 1;
+}
+
+.filter-row .fl-label {
+    width: auto;
+    color: $text-muted;
+    margin-right: 1;
+    content-align: left middle;
+}
+
+.filter-row Input {
+    width: 1fr;
+}
+
+.filter-row .fill {
+    width: 1fr;
+}
+
+.filter-row Select {
+    margin-right: 2;
+}
+
+.filter-row Button {
+    margin-left: 2;
+}
+
+.cap-row {
+    height: auto;
+    layout: horizontal;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+.cap-row Static {
+    width: 1fr;
+}
+
+.cap-row Button {
+    margin-left: 2;
+}
+
+/* ---------- 月份选择器 ---------- */
+.month-picker {
+    height: auto;
+    margin-left: 2;
+}
+
+.month-picker Button {
+    width: 3;
+    padding: 0;
+    height: 1;
+}
+
+.month-picker .mp-cur {
+    width: 9;
+    content-align: center middle;
+    text-style: bold;
+}
+
+/* ---------- 额度进度条（置于 .panel 内） ---------- */
+.quota-bar {
+    height: 1;
+    margin: 1 0 0 0;
+}
+
+.quota-bar .seg {
+    height: 1;
+}
+
+.quota-bar .seg.safe {
+    background: $success;
+}
+
+.quota-bar .seg.over {
+    background: $error;
+}
+
+.quota-bar .seg.rest {
+    background: $panel;
+}
+
+/* ---------- 表格 ---------- */
+.tbl {
+    height: 1fr;
+    margin: 1 1 0 1;
+    border: round $secondary;
+}
+
+.tbl:focus {
+    border: tall $primary;
+}
+
+/* ---------- 信息面板 ---------- */
+.panel {
+    height: auto;
+    margin: 1 1 0 1;
+    padding: 1 2;
+    border: round $secondary;
+}
+
+/* ---------- 首页 ---------- */
+#home-main {
+    height: 1fr;
+    align: center middle;
+}
+
+#home-col {
+    width: 58;
+    height: auto;
+}
+
+#home-banner,
+#home-plain {
+    width: 1fr;
+    text-align: center;
+    color: $primary;
+}
+
+#home-version {
+    width: 1fr;
+    text-align: right;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#home-list {
+    width: 1fr;
+    height: auto;
+    border: none;
+    background: transparent;
+}
+
+HomeScreen #home-plain {
+    display: none;
+}
+
+HomeScreen.-sm #home-banner {
+    display: none;
+}
+
+HomeScreen.-sm #home-plain {
+    display: block;
+}
+
+HomeScreen.-sm #home-col {
+    width: 1fr;
+    padding: 0 2;
+}
+
+/* ---------- 底部状态栏 ---------- */
+#status {
+    height: 1;
+    dock: bottom;
+    padding: 0 1;
+    background: $panel;
+    color: $text;
+}
+
+#status.ok { color: $success; }
+#status.warn { color: $warning; }
+#status.err { color: $error; }

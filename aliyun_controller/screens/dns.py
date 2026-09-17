@@ -26,9 +26,15 @@ from ..widgets import (
     FormField,
     FormModal,
     filter_fuzzy,
+    fit_table_columns,
     load_rows,
     make_table,
+    rcell,
+    shorten,
 )
+
+RR_MAX = 20   # 主机记录显示宽度上限
+VALUE_MAX = 40  # 记录值显示宽度上限
 
 
 def _is_enabled(record: dict) -> bool:
@@ -86,21 +92,33 @@ class DomainListScreen(PageScreen):
         self._domains = domains
         self._rebuild()
 
-    def _rebuild(self) -> None:
+    def _rebuild(self, *, after_layout: bool = False) -> None:
         domains = self._domains
         if self._filter:
             domains = filter_fuzzy(domains, self._filter, lambda d: d.get("DomainName", ""))
         self._display = domains
+        table = self.query_one("#dm-table", DataTable)
+        vis = fit_table_columns(table, [42, 8], rows=len(domains))
+        cnt_key = list(table.columns.keys())[1]
+        table.columns[cnt_key].label = rcell("记录数", vis[1] - 2)
         rows = [
-            [Text(d.get("DomainName", "?")), Text(str(d.get("RecordCount", "-")))]
+            [Text(shorten(d.get("DomainName", "?"), vis[0] - 2)), rcell(d.get("RecordCount", "-"), vis[1] - 2)]
             for d in domains
         ]
-        load_rows(self.query_one("#dm-table", DataTable), rows)
+        load_rows(table, rows)
         self.set_subtitle(f"{len(self._display)}/{len(self._domains)} 个域名")
+        if not after_layout:
+            # 布局稳定后（region/滚动条确定）再整体重建一次，保证列宽、表头、单元格三者一致
+            self.call_after_refresh(lambda: self._rebuild(after_layout=True))
+            return
         if not self._domains:
             self.app.status("未获取到任何域名，请检查账户权限", "warn")
         else:
             self.app.status(f"共 {len(self._domains)} 个域名")
+
+    def on_resize(self, event) -> None:
+        if self.is_mounted:
+            self._rebuild()
 
     # ------------------------------------------------------------ 事件
 
@@ -179,7 +197,7 @@ class RecordListScreen(PageScreen):
     """某域名的解析记录列表，支持筛选、排序、增删改与启停。"""
 
     TITLE = "解析记录"
-    HINT = "↑↓ 移动 · 回车/双击 编辑 · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Ctrl+R 刷新 · Esc 返回"
+    HINT = "单击/回车 编辑 · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Ctrl+R 刷新 · Esc 返回"
 
     BINDINGS = [
         Binding("/", "focus_search", "搜索", show=False),
@@ -249,30 +267,44 @@ class RecordListScreen(PageScreen):
         self._records = records
         self._rebuild()
 
-    def _rebuild(self) -> None:
+    def _rebuild(self, *, after_layout: bool = False) -> None:
         records = sort_records(self._records, self._sort_type, self._sort_order)
         if self._filter:
             records = filter_fuzzy(
                 records, self._filter, lambda r: f"{r.get('RR', '')} {r.get('Value', '')}"
             )
         self._display = records
+        table = self.query_one("#rc-table", DataTable)
+        # 权重：主机记录 / 类型 / 记录值 / TTL / 状态（含列内 padding）
+        vis = fit_table_columns(table, [20, 6, 40, 6, 6], rows=len(records))
+        keys = list(table.columns.keys())
+        table.columns[keys[3]].label = rcell("TTL", vis[3] - 2)
+        table.columns[keys[4]].label = rcell("状态", vis[4] - 2)
         rows = []
         for r in records:
-            status = Text("启用", style=STYLE_OK) if _is_enabled(r) else Text("禁用", style=STYLE_ERR)
+            status = rcell("启用" if _is_enabled(r) else "禁用", vis[4] - 2)
+            status.stylize(STYLE_OK if _is_enabled(r) else STYLE_ERR)
             rows.append([
-                Text(r.get("RR", "?")),
+                Text(shorten(r.get("RR", "?"), min(RR_MAX, vis[0] - 2))),
                 Text(r.get("Type", "?")),
-                Text(r.get("Value", "")),
-                Text(str(r.get("TTL", ""))),
+                Text(shorten(r.get("Value", ""), min(VALUE_MAX, vis[2] - 2))),
+                rcell(r.get("TTL", ""), vis[3] - 2),
                 status,
             ])
-        load_rows(self.query_one("#rc-table", DataTable), rows)
+        load_rows(table, rows)
         sort_label = SORT_TYPE_LABELS[self._sort_type]
         order_label = "逆序" if self._sort_order == 0 else "正序"
         self.set_subtitle(
             f"{self.domain_name} · {len(self._display)}/{len(self._records)} · {sort_label} {order_label}"
         )
         self.app.status(f"共 {len(self._records)} 条解析记录")
+        if not after_layout:
+            # 布局稳定后整体重建一次：列宽、表头、右对齐单元格基于同一份宽度，避免错位
+            self.call_after_refresh(lambda: self._rebuild(after_layout=True))
+
+    def on_resize(self, event) -> None:
+        if self.is_mounted:
+            self._rebuild()
 
     # ------------------------------------------------------------ 记录操作
 

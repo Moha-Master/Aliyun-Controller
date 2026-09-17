@@ -629,3 +629,33 @@ app.theme = "aliyun"
 - **自定义 Message 想被 `@on(Msg, "#id")` 选择器匹配**：必须暴露 `control` 属性；`Message` 无公开 `sender`，返回 `self._sender`。
 - **`Switch`（8.2.8）**：`value` 为 bool（`is True` 可直接比较），单击整个控件即切换（`_on_click → toggle`），Enter/Space 同；适合做表单里的布尔条目。
 - **表单弹窗纵向空间**：`> .modal-box { min-height: N }` + body `height: 1fr`，容器被 min-height 撑开时 fr 子项吃到多余空间、`dock: bottom` 按钮栏仍贴底。
+
+### 8.1 单击执行表格（ClickTable 配方）
+
+- `ClickTable(DataTable)` 重写 `on_click`：从 `event.style.meta` 读 `row/column`，命中数据格（`0 <= row < row_count`、`col >= 0`、非 `out_of_bounds`）时 `cursor_coordinate = Coordinate(row, col)` + `_post_selected_message()` 并 `return`；表头/行标签等回落到 `await super()._on_click(event)`。
+- 派发顺序依据 `message_pump._get_dispatch_methods`：按 MRO 逐类取 `cls.__dict__["_on_click"] or cls.__dict__["on_click"]`，所以子类的 `on_click` 先执行、原生 `_on_click` 随后（移动光标/表头消息不受影响），键盘 Enter 的 `RowSelected` 语义保留。
+- 屏幕级 `on_click`（如 PageScreen 收起浮层）收到的是冒泡 Click，`event.x/y` 为屏幕坐标，配合 `Region.contains(x, y)` 判断点击是否在浮层外。
+
+### 8.2 DataTable 列宽
+
+- `add_column(label, width=int)` → `Column.width` 固定（含左右 padding 各 1）；`width=None` 为 `auto_width`（按内容）。
+- 动态铺满：改 `column.width` 后需 `column.auto_width = False` + `table.refresh(layout=True)`（封装为 `widgets.fit_table_columns`）。
+- 无列对齐属性：右对齐用前导空格（`rcell`，按 `rich.cells.cell_len` 补位），表头同样处理；`Column.label` 可赋值更新。
+
+### 8.3 DataTable 单击执行的双派发坑
+
+- Textual 沿 MRO 逐类查找事件 handler（`message_pump._get_dispatch_methods`）：子类定义 `on_click`/`_on_click` 后，**父类 `DataTable._on_click` 仍会被派发一次**。重写点击时必须对接管与回落两条路径都 `event.prevent_default()`，否则光标移动/`RowSelected` 双发（表现为 push 两次、需要按两次 Esc）。
+- Click/Mouse 事件冒泡到 Screen 时 `event.x/y` 会被改写成相对坐标；判断“点在哪”一律用 `event.screen_x/screen_y`。
+- `virtual_size.width` 对垂直滚动条的空间预留时机不稳定（布局前后差 2 cell），列宽铺满后仍可能出现 `max_scroll_x=2`。对策：`.tbl { overflow-x: hidden }` 兜底 + 列宽计算时按 `table.max_scroll_y > 0` 预估预留 2。
+
+### 8.4 页面内浮层（overlay）三要素
+
+1. **父容器（布局上直接包裹浮层的 Widget）必须声明 `layers: base overlay`**——hit-test 的层序取自父容器 styles，缺了就会“看得见但点不到”（点击被下层组件抢走）。
+2. 浮层自身：`position: absolute` + `overlay: screen` + `layer: overlay` + `display` 切换；显示后再设 `styles.offset`（`region.width` 在 display 前为 0，用类常量存宽度）。
+3. Button 系控件布局步进 = `width + 2*line-pad`（Button 默认 `line-pad:1`、`min-width:16`）。紧凑网格必须同时写 `width/min-width/padding/margin`；`line-pad: 0` 是非法值（最小 1），要 4 列宽 4 的步进就得把容器加宽到 4×(width+2)。
+
+### 8.5 列宽/表头/单元格三者同步（首屏右对齐列偏 2 格根因）
+
+- `max_scroll_y` / `scrollbar_size_vertical` 依赖布局时刻：`load_rows` 前=0、有滚动条后=2，两次 `fit` 结果不同。**只重设列宽+表头而不重建单元格** → 首屏右对齐列（空格 padding 基于旧 vis）与列宽错位；滚动/刷新触发整表重建后“自愈”。
+- 规则：垂直滚动条用**行数**确定性预判（`rows > region.height - 3`），列宽、`rcell` 表头、`rcell` 单元格在同一函数内基于同一份 `vis` 生成；布局稳定后用 `call_after_refresh` 再完整重建一次（幂等），禁止局部 patch。
+- `Pilot` 无 `shift_tab()`，用 `pilot.press("shift+tab")`。

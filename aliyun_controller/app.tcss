@@ -110,24 +110,6 @@ Screen {
     margin-left: 2;
 }
 
-/* ---------- 月份选择器 ---------- */
-.month-picker {
-    height: auto;
-    margin-left: 2;
-}
-
-.month-picker Button {
-    width: 3;
-    padding: 0;
-    height: 1;
-}
-
-.month-picker .mp-cur {
-    width: 9;
-    content-align: center middle;
-    text-style: bold;
-}
-
 /* ---------- 额度进度条（置于 .panel 内） ---------- */
 .quota-bar {
     height: 1;
@@ -155,6 +137,7 @@ Screen {
     height: 1fr;
     margin: 1 1 0 1;
     border: round $secondary;
+    overflow-x: hidden;
 }
 
 .tbl:focus {
@@ -216,6 +199,41 @@ HomeScreen.-sm #home-plain {
 HomeScreen.-sm #home-col {
     width: 1fr;
     padding: 0 2;
+}
+
+/* ---------- 设置页：条目展示（点击进入编辑弹窗） ---------- */
+SettingsScreen .set-row {
+    height: auto;
+    layout: horizontal;
+    padding: 0 1;
+    margin-bottom: 1;
+    pointer: pointer;
+}
+
+SettingsScreen .set-row:hover {
+    background: $boost;
+}
+
+SettingsScreen .set-label {
+    width: 18;
+    color: $text-muted;
+    content-align: right middle;
+    margin-right: 2;
+}
+
+SettingsScreen .set-value {
+    width: 1fr;
+    content-align: left middle;
+}
+
+SettingsScreen .set-edit-hint {
+    width: auto;
+    color: $text-muted;
+    content-align: right middle;
+}
+
+SettingsScreen .set-row:hover .set-edit-hint {
+    color: $primary;
 }
 
 /* ---------- 底部状态栏 ---------- */

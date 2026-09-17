@@ -1,29 +1,44 @@
-"""设置屏：查看 / 修改阿里云访问密钥。"""
+"""设置屏：一个大容器直接呈现设置内容，点击「编辑」或密钥行进入与 DNS 同款的操作弹窗。"""
 from rich.text import Text
 from textual import on
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from ..config import get_config_path, load_config, save_config
 from ..ui import PageScreen
-from ..widgets import STYLE_DIM, ConfirmModal, FormField, FormModal
+from ..widgets import STYLE_DIM, FormField, FormModal
 from .setup import mask_key
+
+FIELDS = [
+    ("access_key_id", "AccessKey ID", False),
+    ("access_key_secret", "AccessKey Secret", True),
+]
+_LABEL = {k: lab for k, lab, _ in FIELDS}
 
 
 class SettingsScreen(PageScreen):
-    """阿里云访问密钥设置（配置文件损坏时也可在此重建）。"""
+    """阿里云访问密钥设置。"""
 
     TITLE = "设置"
-    HINT = "回车 / 点击 编辑密钥 · 更改立即生效 · Esc 返回"
+    HINT = "点击密钥条目或「编辑」按钮修改 · 回车 保存 · Esc 返回"
 
     def __init__(self) -> None:
         super().__init__()
         self._config: dict = {}
 
     def compose_page(self):
-        yield Static("", id="st-cred", classes="panel")
+        with Vertical(classes="panel"):
+            with Horizontal(classes="set-row"):
+                yield Static("配置文件", classes="set-label")
+                yield Static("", classes="set-value", id="st-path")
+            for key, label, _secret in FIELDS:
+                with Horizontal(classes="set-row", id=f"row-{key}"):
+                    yield Static(label, classes="set-label")
+                    yield Static("", classes="set-value", id=f"view-{key}")
+                    yield Static("点击编辑 ▸", classes="set-edit-hint")
         with Horizontal(classes="sub-toolbar"):
             yield Button("编辑访问密钥", id="edit", variant="primary")
+            yield Static("更改后立即生效，无需重启", classes="tb-note")
 
     def on_mount(self) -> None:
         try:
@@ -34,19 +49,13 @@ class SettingsScreen(PageScreen):
         self.query_one("#edit", Button).focus()
 
     def _refresh(self) -> None:
-        ak_id = self._config.get("access_key_id", "")
-        ak_secret = self._config.get("access_key_secret", "")
-        t = Text()
-        t.append("配置文件     ", style="bold")
-        t.append(f"{get_config_path()}\n", style=STYLE_DIM)
-        t.append("AccessKey ID ", style="bold")
-        t.append(f"{mask_key(ak_id)}\n")
-        t.append("Secret       ", style="bold")
-        t.append(mask_key(ak_secret))
-        self.query_one("#st-cred", Static).update(t)
+        self.query_one("#st-path", Static).update(Text(str(get_config_path()), style=STYLE_DIM))
+        for key, _, _ in FIELDS:
+            self.query_one(f"#view-{key}", Static).update(mask_key(self._config.get(key, "")))
 
-    @on(Button.Pressed, "#edit")
-    def _edit(self) -> None:
+    # ------------------------------------------------------------ 编辑弹窗（与 DNS 记录同款）
+
+    def _open_editor(self) -> None:
         fields = [
             FormField(
                 "access_key_id", "AccessKey ID",
@@ -63,22 +72,28 @@ class SettingsScreen(PageScreen):
         self.app.push_screen(FormModal("编辑阿里云访问密钥", fields), self._on_edit_done)
 
     def _on_edit_done(self, data: dict | None) -> None:
-        if data is None:
+        if not data:
             return
         secret = data["access_key_secret"] or self._config.get("access_key_secret", "")
         new_config = {"access_key_id": data["access_key_id"].strip(), "access_key_secret": secret}
+        try:
+            save_config(new_config)
+        except Exception as e:  # noqa: BLE001
+            self.app.notify_err(f"保存失败: {e}")
+            return
+        self._config = new_config
+        self.app.reload_config()
+        self._refresh()
+        self.app.notify_ok("访问密钥已更新")
 
-        def confirm(ok: bool) -> None:
-            if not ok:
-                return
-            try:
-                save_config(new_config)
-            except Exception as e:  # noqa: BLE001
-                self.app.notify_err(f"保存失败: {e}")
-                return
-            self._config = new_config
-            self.app.reload_config()
-            self._refresh()
-            self.app.notify_ok("访问密钥已更新")
+    @on(Button.Pressed, "#edit")
+    def _on_edit(self) -> None:
+        self._open_editor()
 
-        self.app.push_screen(ConfirmModal("确认保存新的阿里云访问密钥？"), confirm)
+    def on_click(self, event) -> None:
+        """点击任一密钥条目行进入编辑弹窗（父类 PageScreen.on_click 仍会被派发）。"""
+        for key, _, _ in FIELDS:
+            row = self.query_one(f"#row-{key}")
+            if row.region.contains(event.screen_x, event.screen_y):
+                self._open_editor()
+                return

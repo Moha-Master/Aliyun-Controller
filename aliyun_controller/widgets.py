@@ -7,9 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from rich.cells import cell_len
 from rich.text import Text
+from textual import events
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, Select, Static, Switch
 
@@ -212,11 +215,13 @@ class FormModal(ModalScreen["dict | None"]):
     FormModal { align: center middle; }
     FormModal > .modal-box { width: 92; min-height: 24; }
     FormModal .frm-note { color: $text-muted; height: auto; }
-    FormModal .frm-row { height: auto; margin-bottom: 0; }
+    FormModal .frm-row { height: auto; margin-bottom: 1; }
     FormModal .frm-label { width: 16; height: 1; content-align: right middle; text-style: bold; margin-right: 1; }
     FormModal .frm-field { width: 1fr; height: auto; }
     FormModal .frm-field Input, FormModal .frm-field Select { width: 1fr; margin-top: 0; }
     FormModal .frm-field .frm-note { margin-top: 0; }
+    FormModal .frm-field Switch { height: 1; border: none; padding: 0 1; }
+    FormModal .frm-field Switch:focus { border: none; background-tint: $foreground 8%; }
     FormModal .frm-err { color: $error; height: 1; }
     FormModal .frm-body { height: 1fr; padding: 1 2; }
     FormModal .frm-pad { height: 1; }
@@ -370,8 +375,33 @@ class OutputModal(ModalScreen[None]):
 
 # ---------------------------------------------------------------- 表格辅助
 
-def make_table(*headers, cursor: str = "row", zebra: bool = True, classes: str = "tbl") -> DataTable:
-    dt = DataTable(cursor_type=cursor, zebra_stripes=zebra, classes=classes)
+class ClickTable(DataTable):
+    """列表即操作的表格：单击数据单元格 = 移动光标并立即发 RowSelected。
+
+    注意：Textual 沿 MRO 逐类派发事件，重写 `_on_click` 后父类实现仍会被调用一次，
+    因此接管分支与回落分支都必须 prevent_default()，防止 RowSelected 双发。
+    """
+
+    async def _on_click(self, event: events.Click) -> None:
+        meta = event.style.meta if event.style is not None else {}
+        row = meta.get("row", -1)
+        col = meta.get("column", -1)
+        is_data_cell = (
+            self.cursor_type == "row"
+            and isinstance(row, int) and isinstance(col, int)
+            and 0 <= row < self.row_count and col >= 0
+            and not meta.get("out_of_bounds", False)
+        )
+        if is_data_cell:
+            self.cursor_coordinate = Coordinate(row, col)
+            self._post_selected_message()
+        else:
+            await super()._on_click(event)
+        event.prevent_default()
+
+
+def make_table(*headers, cursor: str = "row", zebra: bool = True, classes: str = "tbl") -> ClickTable:
+    dt = ClickTable(cursor_type=cursor, zebra_stripes=zebra, classes=classes)
     dt.add_columns(*headers)
     return dt
 
@@ -384,9 +414,56 @@ def load_rows(table: DataTable, rows: list) -> DataTable:
     return table
 
 
+def shorten(text: str, limit: int) -> str:
+    """按显示宽度截断，超出部分以省略号结尾。"""
+    text = str(text)
+    if cell_len(text) <= limit:
+        return text
+    out = ""
+    for ch in text:
+        if cell_len(out + ch) > limit - 1:
+            break
+        out += ch
+    return out + "…"
+
+
+def rcell(text, content_width: int) -> Text:
+    """右对齐单元格：文本在 content_width 内右对齐。"""
+    pad = max(0, content_width - cell_len(str(text)))
+    t = Text(" " * pad + str(text))
+    return t
+
+
+def fit_table_columns(table: DataTable, weights: list[float], rows: int | None = None) -> list[int]:
+    """按权重把表格可视内容宽（含每列左右各 1 空格 padding）瓜分给各列。
+
+    返回每列的可视宽度（含 padding），cell 的内容宽 = 可视宽 - 2。
+    需垂直滚动条时额外预留 2 列。传入 rows（即将装载的行数）可**确定性**预判滚动条，
+    避免依赖会变化的 max_scroll_y 导致首帧与二次布局算出不同列宽、右对齐列错位。
+    """
+    ncols = len(weights)
+    if rows is not None:
+        capacity = (table.region.height or 0) - 3  # 上下边框 + 表头
+        need_vbar = capacity <= 0 or rows > capacity
+    else:
+        need_vbar = table.max_scroll_y > 0
+    sbv = 2 if need_vbar else 0
+    avail = max(ncols * 4, (table.region.width or ncols * 20) - 2 - sbv)
+    total_w = sum(weights) or ncols
+    visible = [max(4, int(avail * w / total_w)) for w in weights]
+    # 舍入余量补给最宽列，保证恰好铺满
+    visible[visible.index(max(visible))] += avail - sum(visible)
+    for (_, column), vis in zip(table.columns.items(), visible, strict=True):
+        column.width = vis - 2  # Column.width 不含列内左右 padding
+        column.auto_width = False
+    table.refresh(layout=True)
+    return visible
+
+
 __all__ = [
     "ConfirmModal", "InputModal", "FormField", "FormModal", "OutputModal",
-    "make_table", "load_rows", "filter_fuzzy", "fuzzy_score",
+    "ClickTable", "make_table", "load_rows", "filter_fuzzy", "fuzzy_score",
+    "shorten", "rcell", "fit_table_columns",
     "tint", "colored_text",
     "STYLE_OK", "STYLE_ERR", "STYLE_WARN", "STYLE_INFO", "STYLE_DIM",
     "HINT_PICK", "HINT_MENU",

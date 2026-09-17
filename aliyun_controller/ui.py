@@ -58,7 +58,12 @@ def current_cycle() -> str:
 # ---------------------------------------------------------------- 月份选择器
 
 class MonthPicker(Horizontal):
-    """◀ YYYY-MM ▶ 组合月份选择器；值变化发 MonthPicker.Changed。"""
+    """◀ YYYY-MM ▶ 组合月份选择器。
+
+    - ◀/▶（或聚焦时 ←/→）逐月切换，范围 [min_cycle, max_cycle]；
+    - 点击月份文本弹出页内浮层（年份切换 + 12 月列表，越界月份禁用）；
+    - 值变化发 MonthPicker.Changed(value)。
+    """
 
     class Changed(Message):
         def __init__(self, value: str) -> None:
@@ -71,6 +76,71 @@ class MonthPicker(Horizontal):
             return self._sender
 
     value = reactive("")
+
+    DEFAULT_CSS = """
+    MonthPicker {
+        layout: horizontal;
+        width: auto;
+        height: auto;
+        margin-left: 2;
+        layers: base overlay;
+    }
+    MonthPicker > Button {
+        width: 3;
+        min-width: 3;
+        padding: 0;
+        height: 1;
+    }
+    MonthPicker > #mp-cur {
+        width: 12;
+        min-width: 12;
+        content-align: center middle;
+        text-style: bold;
+    }
+    MonthPicker #mp-pop {
+        display: none;
+        position: absolute;
+        overlay: screen;
+        layer: overlay;
+        width: 26;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+    }
+    MonthPicker #mp-years {
+        height: auto;
+        layout: horizontal;
+    }
+    MonthPicker #mp-years Button {
+        width: 3;
+        min-width: 3;
+        padding: 0;
+        height: 1;
+    }
+    MonthPicker #mp-years .mp-year {
+        width: auto;
+        padding: 0 1;
+        content-align: center middle;
+        text-style: bold;
+    }
+    MonthPicker #mp-grid {
+        height: auto;
+        padding: 0;
+    }
+    MonthPicker .mp-mrow {
+        height: 1;
+        layout: horizontal;
+    }
+    MonthPicker .mp-m {
+        width: 4;
+        min-width: 4;
+        height: 1;
+        padding: 0;
+        margin: 0;
+    }
+    """
+
+    POP_WIDTH = 26  # 与 DEFAULT_CSS #mp-pop width 保持一致
 
     BINDINGS = [
         Binding("left", "month_prev", show=False),
@@ -88,24 +158,40 @@ class MonthPicker(Horizontal):
         super().__init__(id=id, classes="month-picker")
         self.min_cycle = min_cycle
         self.max_cycle = max_cycle or current_cycle()
+        self._min_year = int(min_cycle[:4])
+        self._max_year = int(self.max_cycle[:4])
         start = value or current_cycle()
-        if start < self.min_cycle:
-            start = self.min_cycle
-        if start > self.max_cycle:
-            start = self.max_cycle
+        start = max(min_cycle, min(start, self.max_cycle))
         self.value = start
+        self._popup_year = int(start[:4])
+        self._popup_open = False
 
     def compose(self):
         yield Button("◀", id="mp-prev", compact=True)
-        yield Static(self.value, classes="mp-cur", id="mp-cur")
+        yield Button(self.value, id="mp-cur", compact=True)
         yield Button("▶", id="mp-next", compact=True)
+        with Vertical(id="mp-pop"):
+            with Horizontal(id="mp-years"):
+                yield Button("◀", id="mp-yprev", compact=True)
+                yield Static(str(self._popup_year), classes="mp-year", id="mp-year-label")
+                yield Button("▶", id="mp-ynext", compact=True)
+            with Vertical(id="mp-grid"):
+                for r in range(3):
+                    with Horizontal(classes="mp-mrow"):
+                        for m in range(r * 4 + 1, r * 4 + 5):
+                            yield Button(f"{m:02d}", id=f"mp-m{m:02d}", classes="mp-m", compact=True)
 
     def watch_value(self, value: str) -> None:
         if self.is_mounted:
-            self.query_one("#mp-cur", Static).update(value)
+            self.query_one("#mp-cur", Button).label = value
+            if self._popup_open:
+                self._rebuild_popup()
             self.post_message(self.Changed(value))
 
+    # ------------------------------------------------------------ 逐月切换
+
     def _step(self, delta: int) -> None:
+        self.close_popup()
         nxt = shift_cycle(self.value, delta)
         if self.min_cycle <= nxt <= self.max_cycle:
             self.value = nxt
@@ -123,6 +209,69 @@ class MonthPicker(Horizontal):
     @on(Button.Pressed, "#mp-next")
     def _on_next(self) -> None:
         self._step(1)
+
+    # ------------------------------------------------------------ 浮层选择
+
+    @property
+    def is_popup_open(self) -> bool:
+        return self._popup_open
+
+    @on(Button.Pressed, "#mp-cur")
+    def _on_toggle(self) -> None:
+        if self._popup_open:
+            self.close_popup()
+        else:
+            self.open_popup()
+
+    def open_popup(self) -> None:
+        self._popup_open = True
+        self._popup_year = int(self.value[:4])
+        pop = self.query_one("#mp-pop")
+        pop.display = True
+        # 靠屏幕右缘的月份按钮：浮层右对齐（超出宽度向左展开）
+        pop.styles.offset = (self.region.width - self.POP_WIDTH, 1)
+        self._rebuild_popup()
+
+    def close_popup(self) -> None:
+        if not self._popup_open:
+            return
+        self._popup_open = False
+        if self.is_mounted:
+            self.query_one("#mp-pop").display = False
+
+    def _rebuild_popup(self) -> None:
+        year = self._popup_year
+        self.query_one("#mp-year-label", Static).update(str(year))
+        self.query_one("#mp-yprev", Button).disabled = year <= self._min_year
+        self.query_one("#mp-ynext", Button).disabled = year >= self._max_year
+        for m in range(1, 13):
+            cycle = f"{year}-{m:02d}"
+            button = self.query_one(f"#mp-m{m:02d}", Button)
+            button.disabled = not (self.min_cycle <= cycle <= self.max_cycle)
+            button.variant = "primary" if cycle == self.value else "default"
+
+    def _shift_year(self, delta: int) -> None:
+        year = self._popup_year + delta
+        if self._min_year <= year <= self._max_year:
+            self._popup_year = year
+            self._rebuild_popup()
+
+    @on(Button.Pressed, "#mp-yprev")
+    def _on_yprev(self) -> None:
+        self._shift_year(-1)
+
+    @on(Button.Pressed, "#mp-ynext")
+    def _on_ynext(self) -> None:
+        self._shift_year(1)
+
+    @on(Button.Pressed, ".mp-m")
+    def _on_pick_month(self, event: Button.Pressed) -> None:
+        assert event.button.id is not None
+        month = int(event.button.id.removeprefix("mp-m"))
+        cycle = f"{self._popup_year}-{month:02d}"
+        self.close_popup()
+        if self.min_cycle <= cycle <= self.max_cycle and cycle != self.value:
+            self.value = cycle
 
 
 # ---------------------------------------------------------------- 额度进度条
@@ -230,9 +379,7 @@ class PageScreen(Screen):
         height: auto;
         layout: horizontal;
     }
-    PageScreen .tb-right Input {
-        width: 34;
-    }
+
     PageScreen .tb-right Select {
         margin-left: 2;
     }
@@ -369,8 +516,25 @@ class PageScreen(Screen):
     def action_page_back(self) -> None:
         if self._menu_open:
             self._close_menu()
-        else:
-            self.app.pop_screen()
+            return
+        for picker in self.query(MonthPicker):
+            if picker.is_popup_open:
+                picker.close_popup()
+                return
+        self.app.pop_screen()
+
+    def on_click(self, event) -> None:
+        """点击浮层外部时收起折叠菜单 / 月份选择浮层。"""
+        if self._menu_open:
+            panel = self.query_one("#page-menu")
+            anchor = self.query_one("#top-menu")
+            if not panel.region.contains(event.screen_x, event.screen_y) and not anchor.region.contains(event.screen_x, event.screen_y):
+                self._close_menu()
+        for picker in self.query(MonthPicker):
+            if picker.is_popup_open:
+                pop = picker.query_one("#mp-pop")
+                if not pop.region.contains(event.screen_x, event.screen_y) and not picker.region.contains(event.screen_x, event.screen_y):
+                    picker.close_popup()
 
     def action_refresh_page(self) -> None:
         self.reload_page()

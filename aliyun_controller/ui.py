@@ -8,6 +8,7 @@ import datetime
 from collections.abc import Callable
 from typing import ClassVar
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import on
 from textual.binding import Binding
@@ -22,7 +23,7 @@ try:  # 不同 textual 版本 Option 导出位置不同
 except ImportError:  # pragma: no cover
     from textual.widgets._option_list import Option
 
-from .widgets import EDIT_HINT, STYLE_ERR
+from .widgets import EDIT_HINT, STYLE_ERR, HintBar
 
 # ---------------------------------------------------------------- 首页 logo
 
@@ -35,11 +36,16 @@ LOGO_LINES = [
     "╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝   ╚═╝   ╚══════╝",
 ]
 
-LOGO_WIDTH = max(len(line) for line in LOGO_LINES)
+LOGO_WIDTH = max(cell_len(line.rstrip()) for line in LOGO_LINES)  # 随 LOGO_LINES 自动计算，换 logo 无需改别处
 
 
 def logo_text() -> Text:
-    return Text("\n".join(LOGO_LINES))
+    return Text("\n".join(line.rstrip() for line in LOGO_LINES))
+
+
+def home_col_width() -> int:
+    """首页栏列宽：跟随 logo，菜单文字更宽时以 40 列兜底。"""
+    return max(LOGO_WIDTH, 40)
 
 
 # ---------------------------------------------------------------- 月份工具
@@ -86,10 +92,8 @@ class MonthPicker(Horizontal):
         layers: base overlay;
     }
     MonthPicker > Button {
-        width: 3;
-        min-width: 3;
-        padding: 0;
-        height: 1;
+        width: 5;
+        min-width: 5;
     }
     MonthPicker > #mp-cur {
         width: 12;
@@ -112,10 +116,8 @@ class MonthPicker(Horizontal):
         layout: horizontal;
     }
     MonthPicker #mp-years Button {
-        width: 3;
-        min-width: 3;
-        padding: 0;
-        height: 1;
+        width: 5;
+        min-width: 5;
     }
     MonthPicker #mp-years .mp-year {
         width: auto;
@@ -132,10 +134,8 @@ class MonthPicker(Horizontal):
         layout: horizontal;
     }
     MonthPicker .mp-m {
-        width: 4;
-        min-width: 4;
-        height: 1;
-        padding: 0;
+        width: 6;
+        min-width: 6;
         margin: 0;
     }
     """
@@ -167,19 +167,19 @@ class MonthPicker(Horizontal):
         self._popup_open = False
 
     def compose(self):
-        yield Button("◀", id="mp-prev", compact=True)
-        yield Button(self.value, id="mp-cur", compact=True)
-        yield Button("▶", id="mp-next", compact=True)
+        yield Button("◀", id="mp-prev")
+        yield Button(self.value, id="mp-cur")
+        yield Button("▶", id="mp-next")
         with Vertical(id="mp-pop"):
             with Horizontal(id="mp-years"):
-                yield Button("◀", id="mp-yprev", compact=True)
+                yield Button("◀", id="mp-yprev")
                 yield Static(str(self._popup_year), classes="mp-year", id="mp-year-label")
-                yield Button("▶", id="mp-ynext", compact=True)
+                yield Button("▶", id="mp-ynext")
             with Vertical(id="mp-grid"):
                 for r in range(3):
                     with Horizontal(classes="mp-mrow"):
                         for m in range(r * 4 + 1, r * 4 + 5):
-                            yield Button(f"{m:02d}", id=f"mp-m{m:02d}", classes="mp-m", compact=True)
+                            yield Button(f"{m:02d}", id=f"mp-m{m:02d}", classes="mp-m")
 
     def watch_value(self, value: str) -> None:
         if self.is_mounted:
@@ -355,7 +355,8 @@ class PageScreen(Screen):
         background: $panel;
         layout: horizontal;
     }
-    PageScreen #topbar Button {
+    PageScreen #topbar #top-back,
+    PageScreen #topbar #top-menu {
         margin-right: 2;
     }
     PageScreen .tb-left {
@@ -390,7 +391,7 @@ class PageScreen(Screen):
         overflow-y: hidden;
     }
     PageScreen .page-hint {
-        height: auto;
+        height: 1;
         padding: 0 1;
         color: $text-muted;
         background: $surface;
@@ -423,17 +424,17 @@ class PageScreen(Screen):
 
     def compose(self):
         with Horizontal(id="topbar"):
-            yield Button("◀ 返回", id="top-back", compact=True)
+            yield Button("◀ 返回", id="top-back")
             with Horizontal(classes="tb-left"):
                 yield Static(Text(self.TITLE, style="bold"), classes="tb-title")
                 yield Static(self.subtitle, classes="tb-sub", id="tb-sub")
             with Horizontal(classes="tb-right"):
                 yield from self.compose_toolbar()
                 if self.menu:
-                    yield Button("菜单 ▾", id="top-menu", compact=True)
+                    yield Button("菜单 ▾", id="top-menu")
         with Vertical(id="page"):
             yield from self.compose_page()
-        yield Static(self.HINT, classes="page-hint", id="page-hint")
+        yield HintBar(self.HINT, classes="page-hint", id="page-hint")
         if self.menu:
             with Vertical(id="page-menu"):
                 yield OptionList(id="menu-list")
@@ -558,7 +559,7 @@ class PageScreen(Screen):
         if not self.is_mounted:
             return
         try:
-            hint = self.query_one("#page-hint", Static)
+            hint = self.query_one("#page-hint", HintBar)
         except Exception:  # noqa: BLE001 — 组合早期尚未挂载
             return
         hint.update(EDIT_HINT if self._editing() else self.HINT)

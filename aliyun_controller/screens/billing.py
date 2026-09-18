@@ -92,7 +92,7 @@ class TrafficScreen(_BillingScreen):
             yield QuotaBar(free=FREE_QUOTA_GB, id="tr-bar")
             with Horizontal(classes="cap-row"):
                 yield Static("", classes="page-hint", id="tr-cap")
-                yield Button("刷新", id="bl-refresh", variant="primary", compact=True)
+                yield Button("刷新", id="bl-refresh", variant="primary")
         table = make_table("产品名称", "计费项", "用量", "折算 GB", "类别")
         table.id = "tr-table"
         yield table
@@ -137,7 +137,7 @@ class SummaryScreen(_BillingScreen):
         with Vertical(classes="panel"):
             yield Static("", id="sum-total")
             with Horizontal(classes="cap-row"):
-                yield Button("刷新", id="bl-refresh", variant="primary", compact=True)
+                yield Button("刷新", id="bl-refresh", variant="primary")
         table = make_table("产品名称", "产品代码", "账单条数", "总金额 (元)")
         table.id = "sum-table"
         yield table

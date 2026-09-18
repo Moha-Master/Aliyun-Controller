@@ -4,6 +4,23 @@ Screen {
     background: $surface;
 }
 
+/* ---------- 按钮：全局单行（替代 compact，无边框；三项目一致） ---------- */
+Button {
+    height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 1;
+}
+
+Button:focus {
+    border: none;
+    text-style: bold reverse;
+}
+
+Button:disabled {
+    text-opacity: 60%;
+}
+
 /* ---------- 模态三段式：标题栏 / 内容 / 按钮栏 ---------- */
 .modal-box {
     layout: vertical;
@@ -40,7 +57,7 @@ Screen {
 
 /* ---------- 页面公共 ---------- */
 .page-hint {
-    height: auto;
+    height: 1;
     padding: 0 1;
     color: $text-muted;
 }
@@ -141,7 +158,7 @@ Screen {
 }
 
 .tbl:focus {
-    border: tall $primary;
+    border: round $primary;
 }
 
 /* ---------- 信息面板 ---------- */
@@ -159,12 +176,17 @@ Screen {
 }
 
 #home-col {
-    width: 72;
+    width: auto;
     max-width: 90%;
     height: auto;
 }
 
-#home-banner,
+#home-banner {
+    width: 1fr;
+    text-align: left;
+    color: $primary;
+}
+
 #home-plain {
     width: 1fr;
     text-align: center;
@@ -185,56 +207,43 @@ Screen {
     background: transparent;
 }
 
-HomeScreen #home-plain {
+.logo-page #home-plain {
     display: none;
 }
 
-HomeScreen.-sm #home-banner {
+.logo-page.-sm #home-banner {
     display: none;
 }
 
-HomeScreen.-sm #home-plain {
+.logo-page.-sm #home-plain {
     display: block;
 }
 
-HomeScreen.-sm #home-col {
+.logo-page.-sm #home-col {
     width: 1fr;
     padding: 0 2;
 }
 
-/* ---------- 设置页：条目展示（点击进入编辑弹窗） ---------- */
-SettingsScreen .set-row {
-    height: auto;
+/* ---------- 设置页：kv 条目（litellm 式容器） ---------- */
+.kv-row {
+    height: 1;
     layout: horizontal;
-    padding: 0 1;
-    margin-bottom: 1;
-    pointer: pointer;
 }
 
-SettingsScreen .set-row:hover {
-    background: $boost;
+.kv-row.gap-top {
+    margin-top: 1;
 }
 
-SettingsScreen .set-label {
+.kv-label {
     width: 18;
     color: $text-muted;
-    content-align: right middle;
-    margin-right: 2;
-}
-
-SettingsScreen .set-value {
-    width: 1fr;
     content-align: left middle;
 }
 
-SettingsScreen .set-edit-hint {
-    width: auto;
-    color: $text-muted;
-    content-align: right middle;
-}
-
-SettingsScreen .set-row:hover .set-edit-hint {
-    color: $primary;
+.kv-value {
+    width: 1fr;
+    content-align: left middle;
+    text-style: bold;
 }
 
 /* ---------- 底部状态栏 ---------- */

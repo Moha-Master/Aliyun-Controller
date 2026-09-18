@@ -7,7 +7,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ..config import save_config
-from ..widgets import FormField, FormModal
+from ..widgets import FormField, FormModal, HintBar
 
 
 def mask_key(key: str) -> str:
@@ -40,7 +40,7 @@ class SetupWizardScreen(ModalScreen[bool]):
             yield Static(Text(title, style="bold"), classes="modal-title")
             with Vertical(classes="modal-main"):
                 yield Static(body, id="sw-msg")
-                yield Static("Esc/Ctrl+C 取消向导并退出程序", classes="page-hint")
+                yield HintBar("Esc/Ctrl+C 取消向导并退出程序", classes="page-hint")
 
     def on_mount(self) -> None:
         self._flow()

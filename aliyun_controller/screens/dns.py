@@ -60,7 +60,7 @@ class DomainListScreen(PageScreen):
             with Horizontal(classes="filter-row"):
                 yield Static("搜索", classes="fl-label")
                 yield Input(placeholder="按域名筛选（/ 聚焦）", compact=True, id="dm-search")
-                yield Button("刷新", id="dm-refresh", compact=True)
+                yield Button("刷新", id="dm-refresh")
         table = make_table("域名", "记录数")
         table.id = "dm-table"
         yield table
@@ -220,7 +220,7 @@ class RecordListScreen(PageScreen):
             with Horizontal(classes="filter-row"):
                 yield Static("搜索", classes="fl-label")
                 yield Input(placeholder="按主机记录 / 记录值筛选（/ 聚焦）", compact=True, id="rc-search")
-                yield Button("刷新", id="rc-refresh", compact=True)
+                yield Button("刷新", id="rc-refresh")
             with Horizontal(classes="filter-row gap-top"):
                 yield Static("排序", classes="fl-label")
                 yield Select(
@@ -232,9 +232,9 @@ class RecordListScreen(PageScreen):
                     value=0, allow_blank=False, compact=True, id="sort-order",
                 )
                 yield Static(classes="fill")
-                yield Button("＋ 新增", id="rc-add", variant="primary", compact=True)
-                yield Button("编辑", id="rc-edit", compact=True)
-                yield Button("删除", id="rc-del", variant="error", compact=True)
+                yield Button("＋ 新增", id="rc-add", variant="primary")
+                yield Button("编辑", id="rc-edit")
+                yield Button("删除", id="rc-del", variant="error")
         table = make_table("主机记录", "类型", "记录值", "TTL", "状态")
         table.id = "rc-table"
         yield table

@@ -1,6 +1,8 @@
-"""设置屏：一个大容器直接呈现设置内容，点击「编辑」或密钥行进入与 DNS 同款的操作弹窗。"""
+"""设置屏：单容器展示配置内容，容器右下角「编辑」按钮进入弹窗（litellm 同款）。"""
+import asyncio
+
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
@@ -13,14 +15,13 @@ FIELDS = [
     ("access_key_id", "AccessKey ID", False),
     ("access_key_secret", "AccessKey Secret", True),
 ]
-_LABEL = {k: lab for k, lab, _ in FIELDS}
 
 
 class SettingsScreen(PageScreen):
     """阿里云访问密钥设置。"""
 
     TITLE = "设置"
-    HINT = "点击密钥条目或「编辑」按钮修改 · 回车 保存 · Esc/Ctrl+C 返回"
+    HINT = "「编辑访问密钥」修改 · Tab 轮切 · 回车 保存 · Esc/Ctrl+C 返回"
 
     def __init__(self) -> None:
         super().__init__()
@@ -28,32 +29,42 @@ class SettingsScreen(PageScreen):
 
     def compose_page(self):
         with Vertical(classes="panel"):
-            with Horizontal(classes="set-row"):
-                yield Static("配置文件", classes="set-label")
-                yield Static("", classes="set-value", id="st-path")
+            with Horizontal(classes="kv-row"):
+                yield Static("配置文件", classes="kv-label")
+                yield Static("", classes="kv-value", id="st-path")
             for key, label, _secret in FIELDS:
-                with Horizontal(classes="set-row", id=f"row-{key}"):
-                    yield Static(label, classes="set-label")
-                    yield Static("", classes="set-value", id=f"view-{key}")
-                    yield Static("点击编辑 ▸", classes="set-edit-hint")
-        with Horizontal(classes="sub-toolbar"):
-            yield Button("编辑访问密钥", id="edit", variant="primary")
-            yield Static("更改后立即生效，无需重启", classes="tb-note")
+                with Horizontal(classes="kv-row gap-top"):
+                    yield Static(label, classes="kv-label")
+                    yield Static("", classes="kv-value", id=f"view-{key}")
+            with Horizontal(classes="kv-row gap-top"):
+                yield Static("更新方式", classes="kv-label")
+                yield Static("更改后立即生效，无需重启", classes="kv-value", id="st-note")
+            with Horizontal(classes="filter-row gap-top"):
+                yield Static(classes="fill")
+                yield Button("编辑访问密钥", id="edit", variant="primary")
 
     def on_mount(self) -> None:
-        try:
-            self._config = load_config()
-        except Exception:  # noqa: BLE001 — 配置损坏时以 App 内存态兜底
-            self._config = self.app.config or {}
-        self._refresh()
+        self.reload_page()
         self.query_one("#edit", Button).focus()
+
+    def reload_page(self) -> None:
+        self._load()
+
+    @work(exclusive=True)
+    async def _load(self) -> None:
+        try:
+            cfg = await asyncio.to_thread(load_config)
+        except Exception:  # noqa: BLE001 — 配置损坏时以 App 内存态兜底
+            cfg = self.app.config or {}
+        self._config = cfg
+        self._refresh()
 
     def _refresh(self) -> None:
         self.query_one("#st-path", Static).update(Text(str(get_config_path()), style=STYLE_DIM))
         for key, _, _ in FIELDS:
             self.query_one(f"#view-{key}", Static).update(mask_key(self._config.get(key, "")))
 
-    # ------------------------------------------------------------ 编辑弹窗（与 DNS 记录同款）
+    # ------------------------------------------------------------ 编辑弹窗
 
     def _open_editor(self) -> None:
         fields = [
@@ -89,11 +100,3 @@ class SettingsScreen(PageScreen):
     @on(Button.Pressed, "#edit")
     def _on_edit(self) -> None:
         self._open_editor()
-
-    def on_click(self, event) -> None:
-        """点击任一密钥条目行进入编辑弹窗（父类 PageScreen.on_click 仍会被派发）。"""
-        for key, _, _ in FIELDS:
-            row = self.query_one(f"#row-{key}")
-            if row.region.contains(event.screen_x, event.screen_y):
-                self._open_editor()
-                return

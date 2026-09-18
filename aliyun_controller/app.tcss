@@ -159,7 +159,8 @@ Screen {
 }
 
 #home-col {
-    width: 58;
+    width: 72;
+    max-width: 90%;
     height: auto;
 }
 

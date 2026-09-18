@@ -45,7 +45,7 @@ class DomainListScreen(PageScreen):
     """域名列表，回车进入该域名的解析记录。"""
 
     TITLE = "DNS 解析管理"
-    HINT = "↑↓ 移动 · 回车 管理解析记录 · / 搜索 · Ctrl+R 刷新 · Esc 返回"
+    HINT = "↑↓ 移动 · 回车 管理解析记录 · / 搜索 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [Binding("/", "focus_search", "搜索", show=False)]
 
@@ -197,7 +197,7 @@ class RecordListScreen(PageScreen):
     """某域名的解析记录列表，支持筛选、排序、增删改与启停。"""
 
     TITLE = "解析记录"
-    HINT = "单击/回车 编辑 · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Ctrl+R 刷新 · Esc 返回"
+    HINT = "单击/回车 编辑 · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("/", "focus_search", "搜索", show=False),

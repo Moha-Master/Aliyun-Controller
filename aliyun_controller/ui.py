@@ -15,24 +15,24 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Button, OptionList, Static
+from textual.widgets import Button, Input, OptionList, Static, TextArea
 
 try:  # 不同 textual 版本 Option 导出位置不同
     from textual.widgets.option_list import Option
 except ImportError:  # pragma: no cover
     from textual.widgets._option_list import Option
 
-from .widgets import STYLE_ERR
+from .widgets import EDIT_HINT, STYLE_ERR
 
 # ---------------------------------------------------------------- 首页 logo
 
 LOGO_LINES = [
-    " █████╗ ██╗     ██╗██╗   ██╗██╗   ██╗███╗   ██╗",
-    "██╔══██╗██║     ██║╚██╗ ██╔╝██║   ██║████╗  ██║",
-    "███████║██║     ██║ ╚████╔╝ ██║   ██║██╔██╗ ██║",
-    "██╔══██║██║     ██║  ╚██╔╝  ██║   ██║██║╚██╗██║",
-    "██║  ██║███████╗██║   ██║   ╚██████╔╝██║ ╚████║",
-    "╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝",
+    " █████╗ ██╗     ██╗██╗   ██╗██╗   ██╗███╗   ██╗ ██████╗████████╗██╗     ",
+    "██╔══██╗██║     ██║╚██╗ ██╔╝██║   ██║████╗  ██║██╔════╝╚══██╔══╝██║     ",
+    "███████║██║     ██║ ╚████╔╝ ██║   ██║██╔██╗ ██║██║        ██║   ██║     ",
+    "██╔══██║██║     ██║  ╚██╔╝  ██║   ██║██║╚██╗██║██║        ██║   ██║     ",
+    "██║  ██║███████╗██║   ██║   ╚██████╔╝██║ ╚████║╚██████╗   ██║   ███████╗",
+    "╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝   ╚═╝   ╚══════╝",
 ]
 
 LOGO_WIDTH = max(len(line) for line in LOGO_LINES)
@@ -332,10 +332,10 @@ class PageScreen(Screen):
 
     TITLE: ClassVar[str] = ""
     SUBTITLE: ClassVar[str] = ""
-    HINT: ClassVar[str] = "↑↓ 移动 · 回车 执行 · Ctrl+R 刷新 · Esc 返回"
+    HINT: ClassVar[str] = "↑↓ 移动 · 回车 执行 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
-        Binding("escape", "page_back", "返回"),
+        Binding("escape,ctrl+c", "page_back", "返回"),
         Binding("ctrl+r", "refresh_page", "刷新"),
         Binding("home", "page_top", "顶部", show=False),
         Binding("end", "page_bottom", "底部", show=False),
@@ -433,7 +433,7 @@ class PageScreen(Screen):
                     yield Button("菜单 ▾", id="top-menu", compact=True)
         with Vertical(id="page"):
             yield from self.compose_page()
-        yield Static(self.HINT, classes="page-hint")
+        yield Static(self.HINT, classes="page-hint", id="page-hint")
         if self.menu:
             with Vertical(id="page-menu"):
                 yield OptionList(id="menu-list")
@@ -541,6 +541,33 @@ class PageScreen(Screen):
 
     def reload_page(self) -> None:
         """子类覆写：重新取数。"""
+
+    # ------------------------------------------------------------ 文本编辑模式
+
+    def on_descendant_focus(self, event) -> None:
+        self._refresh_hint()
+
+    def on_descendant_blur(self, event) -> None:
+        self._refresh_hint()
+
+    def _editing(self) -> bool:
+        return isinstance(self.app.focused, (Input, TextArea))
+
+    def _refresh_hint(self) -> None:
+        """焦点进出输入框时，在页面 HINT 与编辑键位 HINT 间切换。"""
+        if not self.is_mounted:
+            return
+        try:
+            hint = self.query_one("#page-hint", Static)
+        except Exception:  # noqa: BLE001 — 组合早期尚未挂载
+            return
+        hint.update(EDIT_HINT if self._editing() else self.HINT)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """文本编辑模式下禁用页面刷新（Ctrl+R），其余交给控件原生键位。"""
+        if action == "refresh_page" and self._editing():
+            return False
+        return True
 
     def _scroller(self):
         """Home/End/PgUp/PgDn 目标：优先内容区内的显式滚动容器（表格滚动走其自身键位）。"""

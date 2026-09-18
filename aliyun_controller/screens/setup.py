@@ -1,6 +1,7 @@
 """首启 / 重置配置向导：采集阿里云 RAM 访问密钥并写盘。"""
 from rich.text import Text
 from textual import work
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static
@@ -25,6 +26,8 @@ class SetupWizardScreen(ModalScreen[bool]):
     SetupWizardScreen > .sw-intro { width: 90; height: auto; }
     """
 
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
+
     def __init__(self, reason: str = "", config_missing: bool = True) -> None:
         super().__init__()
         self.reason = reason
@@ -37,10 +40,13 @@ class SetupWizardScreen(ModalScreen[bool]):
             yield Static(Text(title, style="bold"), classes="modal-title")
             with Vertical(classes="modal-main"):
                 yield Static(body, id="sw-msg")
-                yield Static("Esc 取消向导并退出程序", classes="page-hint")
+                yield Static("Esc/Ctrl+C 取消向导并退出程序", classes="page-hint")
 
     def on_mount(self) -> None:
         self._flow()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
     @work(exclusive=True)
     async def _flow(self) -> None:

@@ -19,7 +19,7 @@ class HomeScreen(Screen):
     """功能主菜单：流量 / 账单 / DNS / 设置 / 退出。"""
 
     BINDINGS = [
-        Binding("q", "menu('quit')", "退出"),
+        Binding("escape,ctrl+c", "menu('quit')", "退出"),
         Binding("1", "menu('traffic')", "流量", show=False),
         Binding("2", "menu('billing')", "账单", show=False),
         Binding("3", "menu('dns')", "DNS", show=False),
@@ -42,7 +42,7 @@ class HomeScreen(Screen):
                 yield Static(Text("Aliyun Controller", style="bold"), id="home-plain")
                 yield Static(f"v{__version__}", id="home-version")
                 yield OptionList(id="home-list")
-        yield Static("↑↓ 选择 · 回车 进入 · 1-5 直达 · Ctrl+Q 退出", classes="page-hint")
+        yield Static("↑↓ 选择 · 回车 进入 · 1-5 直达 · Esc/Ctrl+C 退出", classes="page-hint")
 
     def on_mount(self) -> None:
         ol = self.query_one("#home-list", OptionList)

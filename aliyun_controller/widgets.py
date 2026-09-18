@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, Label, Select, Static, Switch
+from textual.widgets import Button, DataTable, Input, Label, Select, Static, Switch, TextArea
 
 # ---------------------------------------------------------------- 文案与配色
 
@@ -44,6 +44,11 @@ def colored_text(value: str, *, err: bool = False, warn: bool = False, dim: bool
 
 HINT_PICK = "输入筛选 · ↑↓ 移动 · 回车 确认 · Esc 取消"
 HINT_MENU = "↑↓ 移动 · 回车 确认 · Ctrl+Q 退出"
+# 文本编辑模式（焦点在 Input / TextArea）：GUI 风编辑键位，输入框聚焦时替换页面 HINT
+HINT_FORM = "Tab 轮切字段 · Enter 提交 · Esc/Ctrl+C 取消"
+EDIT_HINT = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Esc/Ctrl+C 返回"
+HINT_FORM_EDIT = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Enter 提交 · Esc/Ctrl+C 取消"
+HINT_FORM_TA = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Ctrl+Z/Y 撤销/重做 · Esc/Ctrl+C 取消"
 
 
 # ---------------------------------------------------------------- 模糊匹配
@@ -91,7 +96,7 @@ class ConfirmModal(ModalScreen[bool]):
     ConfirmModal .cf-msg { height: auto; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(self, message, title="请确认", *, yes="确认", no="取消", default_yes=True):
         super().__init__()
@@ -137,7 +142,7 @@ class InputModal(ModalScreen[str | None]):
     InputModal .im-input { margin-bottom: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(
         self,
@@ -166,12 +171,26 @@ class InputModal(ModalScreen[str | None]):
                 if self.hint_text:
                     yield Static(self.hint_text, classes="im-hint")
                 yield Static("", classes="im-error", id="im-error")
+                yield Static("", classes="page-hint", id="im-hint")
             with Horizontal(classes="btn-row"):
                 yield Button("取消", id="im-cancel", variant="default")
                 yield Button("确定", id="im-ok", variant="primary")
 
     def on_mount(self) -> None:
         self.query_one("#im-input", Input).focus()
+        self._refresh_hint()
+
+    def on_descendant_focus(self, event) -> None:
+        self._refresh_hint()
+
+    def on_descendant_blur(self, event) -> None:
+        self._refresh_hint()
+
+    def _refresh_hint(self) -> None:
+        if not self.is_mounted:
+            return
+        editing = isinstance(self.app.focused, (Input, TextArea))
+        self.query_one("#im-hint", Static).update(HINT_FORM_EDIT if editing else HINT_FORM)
 
     def _submit(self) -> None:
         val = self.query_one("#im-input", Input).value.strip()
@@ -227,7 +246,7 @@ class FormModal(ModalScreen["dict | None"]):
     FormModal .frm-pad { height: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(self, title: str, fields: list, *, message: str = "", ok_label="保存", extra_buttons=None):
         super().__init__()
@@ -276,6 +295,7 @@ class FormModal(ModalScreen["dict | None"]):
                             if f.hint:
                                 yield Static(f.hint, classes="frm-note")
             yield Static("", classes="frm-err", id="frm-error")
+            yield Static("", classes="page-hint", id="frm-hint")
             with Horizontal(classes="btn-row"):
                 yield Button("取消", id="frm-cancel", variant="default")
                 yield Button(self.ok_label, id="frm-ok", variant="primary")
@@ -286,6 +306,25 @@ class FormModal(ModalScreen["dict | None"]):
         first_input = self.query(Input)
         if first_input:
             first_input.first().focus()
+        self._refresh_hint()
+
+    def on_descendant_focus(self, event) -> None:
+        self._refresh_hint()
+
+    def on_descendant_blur(self, event) -> None:
+        self._refresh_hint()
+
+    def _refresh_hint(self) -> None:
+        if not self.is_mounted:
+            return
+        focused = self.app.focused
+        if isinstance(focused, TextArea):
+            text = HINT_FORM_TA
+        elif isinstance(focused, Input):
+            text = HINT_FORM_EDIT
+        else:
+            text = HINT_FORM
+        self.query_one("#frm-hint", Static).update(text)
 
     def _collect(self) -> "dict | None":
         """收集表单值；校验失败时写入错误信息并返回 None。可在子类扩展。"""
@@ -349,7 +388,7 @@ class OutputModal(ModalScreen[None]):
     """
 
     BINDINGS = [
-        Binding("escape", "close", show=False),
+        Binding("escape,ctrl+c", "close", show=False),
         Binding("enter", "close", show=False),
     ]
 
@@ -400,8 +439,8 @@ class ClickTable(DataTable):
         event.prevent_default()
 
 
-def make_table(*headers, cursor: str = "row", zebra: bool = True, classes: str = "tbl") -> ClickTable:
-    dt = ClickTable(cursor_type=cursor, zebra_stripes=zebra, classes=classes)
+def make_table(*headers, cursor: str = "row", zebra: bool = True, classes: str = "tbl", **kwargs) -> ClickTable:
+    dt = ClickTable(cursor_type=cursor, zebra_stripes=zebra, classes=classes, **kwargs)
     dt.add_columns(*headers)
     return dt
 
@@ -466,5 +505,5 @@ __all__ = [
     "shorten", "rcell", "fit_table_columns",
     "tint", "colored_text",
     "STYLE_OK", "STYLE_ERR", "STYLE_WARN", "STYLE_INFO", "STYLE_DIM",
-    "HINT_PICK", "HINT_MENU",
+    "HINT_PICK", "HINT_MENU", "HINT_FORM", "EDIT_HINT", "HINT_FORM_EDIT", "HINT_FORM_TA",
 ]

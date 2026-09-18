@@ -3,6 +3,7 @@ from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widgets import Static
 
 from .billing import AliCloudBssQuerier
@@ -20,6 +21,10 @@ class AliyunControllerApp(App):
     CSS_PATH = Path(__file__).parent / "app.tcss"
     TITLE = "Aliyun Controller"
     ENABLE_COMMAND_PALETTE = False
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "退出", priority=True),
+    ]
 
     def __init__(self) -> None:
         super().__init__()

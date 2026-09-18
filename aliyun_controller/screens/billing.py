@@ -16,7 +16,7 @@ FREE_QUOTA_GB = 20.0
 
 
 def _cycle_hint() -> str:
-    return "◀▶ 切月 · Ctrl+R 刷新 · Esc 返回 · 滚轮浏览"
+    return "◀▶ 切月 · Ctrl+R 刷新 · Esc/Ctrl+C 返回 · 滚轮浏览"
 
 
 class _BillingScreen(PageScreen):

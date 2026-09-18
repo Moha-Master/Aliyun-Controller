@@ -20,7 +20,7 @@ class SettingsScreen(PageScreen):
     """阿里云访问密钥设置。"""
 
     TITLE = "设置"
-    HINT = "点击密钥条目或「编辑」按钮修改 · 回车 保存 · Esc 返回"
+    HINT = "点击密钥条目或「编辑」按钮修改 · 回车 保存 · Esc/Ctrl+C 返回"
 
     def __init__(self) -> None:
         super().__init__()

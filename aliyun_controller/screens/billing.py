@@ -45,6 +45,9 @@ class _BillingScreen(PageScreen):
     @work(exclusive=True)
     async def _reload(self) -> None:
         self.app.status(f"正在查询 {self.billing_cycle} 的账单明细…")
+        tables = list(self.query(DataTable))
+        for t in tables:
+            t.loading = True
         querier = self.app.get_billing()
         try:
             payload = await asyncio.to_thread(self.fetch, self.billing_cycle, querier)
@@ -56,6 +59,11 @@ class _BillingScreen(PageScreen):
             self.app.notify_err(f"查询失败: {type(e).__name__}: {e}")
             self._show_error()
             return
+        finally:
+            for t in tables:
+                t.loading = False
+            if tables:
+                tables[0].focus()
         self.set_subtitle(self.billing_cycle)
         self._show_result(payload)
 

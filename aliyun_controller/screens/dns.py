@@ -25,6 +25,7 @@ from ..widgets import (
     ConfirmModal,
     FormField,
     FormModal,
+    busy,
     filter_fuzzy,
     fit_table_columns,
     load_rows,
@@ -77,6 +78,8 @@ class DomainListScreen(PageScreen):
     @work(exclusive=True)
     async def _load(self) -> None:
         self.app.status("正在获取域名列表…")
+        table = self.query_one(DataTable)
+        table.loading = True
         try:
             domains = await asyncio.to_thread(self.app.get_dns().get_domains)
         except AliyunApiError as e:
@@ -89,6 +92,9 @@ class DomainListScreen(PageScreen):
             self._domains = []
             self._rebuild()
             return
+        finally:
+            table.loading = False
+            table.focus()
         self._domains = domains
         self._rebuild()
 
@@ -252,6 +258,8 @@ class RecordListScreen(PageScreen):
     @work(exclusive=True)
     async def _load(self) -> None:
         self.app.status(f"正在获取 {self.domain_name} 的解析记录…")
+        table = self._table()
+        table.loading = True
         try:
             records = await asyncio.to_thread(self.app.get_dns().get_domain_records, self.domain_name)
         except AliyunApiError as e:
@@ -264,6 +272,9 @@ class RecordListScreen(PageScreen):
             self._records = []
             self._rebuild()
             return
+        finally:
+            table.loading = False
+            table.focus()
         self._records = records
         self._rebuild()
 
@@ -350,14 +361,14 @@ class RecordListScreen(PageScreen):
         elif isinstance(result, dict):
             self._save_record(record, is_new, result)
 
-    def _save_record(self, record: dict | None, is_new: bool, data: dict) -> None:
+    @work(exclusive=True)
+    async def _save_record(self, record: dict | None, is_new: bool, data: dict) -> None:
         dns = self.app.get_dns()
         enabled = bool(data.get("status", True))
-        try:
+
+        def _apply() -> None:
             if is_new:
-                rid = dns.add_domain_record(
-                    self.domain_name, data["rr"], data["type"], data["value"], data["ttl"]
-                )
+                rid = dns.add_domain_record(self.domain_name, data["rr"], data["type"], data["value"], data["ttl"])
                 if rid and not enabled:
                     dns.set_domain_record_status(rid, "Disable")
             else:
@@ -368,6 +379,10 @@ class RecordListScreen(PageScreen):
                     dns.set_domain_record_status(
                         record.get("RecordId"), "Enable" if enabled else "Disable"
                     )
+
+        try:
+            async with busy(self.app, "正在保存解析记录…", mode="bar"):
+                await asyncio.to_thread(_apply)
         except AliyunApiError as e:
             self.app.notify_err(str(e))
             return
@@ -380,13 +395,7 @@ class RecordListScreen(PageScreen):
         def confirm(ok: bool) -> None:
             if not ok:
                 return
-            try:
-                self.app.get_dns().delete_domain_record(record.get("RecordId"))
-            except AliyunApiError as e:
-                self.app.notify_err(str(e))
-                return
-            self.app.notify_ok(f"已删除解析记录 {name}")
-            self._load()
+            self._do_delete(record, name)
 
         self.app.push_screen(
             ConfirmModal(
@@ -397,6 +406,17 @@ class RecordListScreen(PageScreen):
             ),
             confirm,
         )
+
+    @work(exclusive=True)
+    async def _do_delete(self, record: dict, name: str) -> None:
+        try:
+            async with busy(self.app, f"正在删除 {name}…", mode="bar"):
+                await asyncio.to_thread(self.app.get_dns().delete_domain_record, record.get("RecordId"))
+        except AliyunApiError as e:
+            self.app.notify_err(str(e))
+            return
+        self.app.notify_ok(f"已删除解析记录 {name}")
+        self._load()
 
     # ------------------------------------------------------------ 事件
 

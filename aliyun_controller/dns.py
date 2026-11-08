@@ -128,6 +128,26 @@ def validate_dns_record(rr: str, record_type: str, value: str, ttl: int) -> str 
     return None
 
 
+def record_content_changed(record: dict, rr: str, record_type: str, value: str, ttl: int) -> bool:
+    """编辑后的内容是否与现有记录不同。
+
+    阿里云 UpdateDomainRecord 在 RR/Type/Value 与原记录完全相同时会返回
+    ``DomainRecordDuplicate``（解析记录已存在），因此调用方必须先做差异判断，
+    内容未变化时跳过更新。
+    """
+    current_ttl = record.get("TTL")
+    try:
+        same_ttl = int(current_ttl) == int(ttl)
+    except (TypeError, ValueError):
+        same_ttl = str(current_ttl) == str(ttl)
+    return not (
+        str(record.get("RR", "")).strip() == str(rr).strip()
+        and str(record.get("Type", "")).upper() == str(record_type).upper()
+        and str(record.get("Value", "")).strip() == str(value).strip()
+        and same_ttl
+    )
+
+
 def sort_records(records: list, sort_type: int, sort_order: int) -> list:
     """返回排序后的新列表。sort_type: 0 创建时间 / 1 二级域名 / 2 首字母；sort_order: 0 逆序 / 1 正序。"""
     records = list(records)

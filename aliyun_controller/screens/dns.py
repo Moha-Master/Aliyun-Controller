@@ -15,6 +15,7 @@ from ..dns import (
     DNS_RECORD_TYPES,
     SORT_ORDER_LABELS,
     SORT_TYPE_LABELS,
+    record_content_changed,
     sort_records,
     validate_dns_record,
 )
@@ -364,29 +365,47 @@ class RecordListScreen(PageScreen):
     @work(exclusive=True)
     async def _save_record(self, record: dict | None, is_new: bool, data: dict) -> None:
         dns = self.app.get_dns()
+        record = record or {}
         enabled = bool(data.get("status", True))
+        content_changed = False
+        status_changed = False
+        if not is_new:
+            # 内容与状态分开处理：内容未变化时不调 UpdateDomainRecord，
+            # 否则阿里云会以 DomainRecordDuplicate（解析记录已存在）拒绝请求。
+            content_changed = record_content_changed(
+                record, data["rr"], data["type"], data["value"], data["ttl"]
+            )
+            status_changed = enabled != _is_enabled(record)
+            if not content_changed and not status_changed:
+                self.app.notify_warn("未做任何修改")
+                return
 
-        def _apply() -> None:
+        def _apply() -> str:
             if is_new:
                 rid = dns.add_domain_record(self.domain_name, data["rr"], data["type"], data["value"], data["ttl"])
                 if rid and not enabled:
                     dns.set_domain_record_status(rid, "Disable")
-            else:
-                dns.update_domain_record(
-                    record.get("RecordId"), data["rr"], data["type"], data["value"], data["ttl"]
-                )
-                if enabled != _is_enabled(record):
-                    dns.set_domain_record_status(
-                        record.get("RecordId"), "Enable" if enabled else "Disable"
-                    )
+                return "已新增解析记录" if enabled else "已新增解析记录（已禁用）"
+            record_id = record.get("RecordId")
+            if content_changed:
+                dns.update_domain_record(record_id, data["rr"], data["type"], data["value"], data["ttl"])
+            if status_changed:
+                dns.set_domain_record_status(record_id, "Enable" if enabled else "Disable")
+            if content_changed and status_changed:
+                return "已更新解析记录并调整启用状态"
+            if content_changed:
+                return "已更新解析记录"
+            return "已启用解析记录" if enabled else "已禁用解析记录"
 
         try:
             async with busy(self.app, "正在保存解析记录…", mode="bar"):
-                await asyncio.to_thread(_apply)
+                message = await asyncio.to_thread(_apply)
         except AliyunApiError as e:
             self.app.notify_err(str(e))
+            # 内容与状态是两次独立调用，失败时可能已部分生效；重载列表以反映实际状态
+            self._load()
             return
-        self.app.notify_ok("已新增解析记录" if is_new else "已更新解析记录")
+        self.app.notify_ok(message)
         self._load()
 
     def _delete_record(self, record: dict) -> None:

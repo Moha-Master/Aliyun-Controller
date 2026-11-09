@@ -13,7 +13,7 @@ from typing import Any
 from rich.cells import cell_len
 from rich.style import Style
 from rich.text import Text
-from textual import events
+from textual import events, on
 from textual.binding import Binding
 from textual.clock import Clock
 from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
@@ -109,14 +109,37 @@ def filter_fuzzy(items: list, needle: str, key: Callable[[Any], str]) -> list:
     return [it for _, _, it in scored]
 
 
+# ---------------------------------------------------------------- 选项模型
+
+@dataclass
+class PickItem:
+    """PickModal 的单选项：value 回传，label 主文本，hint 次要说明（也参与模糊筛选）。"""
+
+    value: Any
+    label: str
+    disabled: bool = False
+    hint: str = ""
+
+    def display(self) -> str:
+        if self.hint:
+            sep = "  →  " if self.disabled else "  ·  "
+            return f"{self.label}{sep}{self.hint}"
+        return self.label
+
+
 # ---------------------------------------------------------------- 确认弹窗
 
 class ConfirmModal(ModalScreen[bool]):
-    """通用确认框：三段式（标题栏 / 内容 / 按钮栏）。回车 = 确认，Esc / 取消 = 否。"""
+    """通用确认框：三段式（标题栏 / 内容 / 按钮栏）。
+
+    回车触发**当前焦点按钮**：`default_yes=True` 时初始焦点在「确认」，回车即确认；
+    不可逆操作用 `default_yes=False`，初始焦点落在「取消」——回车仍然有响应（=放弃），
+    要确认必须 Tab 过去或直接点击，避免误按回车造成损失。Esc / Ctrl+C 始终为否。
+    """
 
     DEFAULT_CSS = """
     ConfirmModal { align: center middle; }
-    ConfirmModal > .modal-box { width: 76; }
+    ConfirmModal > .modal-box { width: 76; max-width: 95%; }
     ConfirmModal .cf-msg { height: auto; }
     """
 
@@ -139,11 +162,10 @@ class ConfirmModal(ModalScreen[bool]):
                 yield Button(self.no_label, id="no", variant="default")
                 yield Button(self.yes_label, id="yes", variant="primary" if self.default_yes else "error")
 
-    def on_key(self, event) -> None:
-        if event.key == "enter":
-            event.stop()
-            event.prevent_default()
-            self.dismiss(True)
+    def on_mount(self) -> None:
+        """回车触发焦点按钮：可逆操作聚焦「确认」，不可逆操作聚焦「取消」。"""
+        with contextlib.suppress(NoMatches):
+            self.query_one("#yes" if self.default_yes else "#no", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
@@ -159,7 +181,7 @@ class InputModal(ModalScreen[str | None]):
 
     DEFAULT_CSS = """
     InputModal { align: center middle; }
-    InputModal > .modal-box { width: 80; }
+    InputModal > .modal-box { width: 80; max-width: 95%; }
     InputModal .im-error { color: $error; height: auto; }
     InputModal .im-hint { color: $text-muted; height: auto; }
     InputModal .im-msg { height: auto; margin-bottom: 1; }
@@ -236,27 +258,176 @@ class InputModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+# ---------------------------------------------------------------- 单选弹窗（模糊筛选）
+
+class PickModal(ModalScreen["PickItem | None"]):
+    """模糊筛选单选列表：三段式，回车 / 选项单击选中，Esc / Ctrl+C 取消。"""
+
+    DEFAULT_CSS = """
+    PickModal { align: center middle; }
+    PickModal > .modal-box { width: 92; max-width: 95%; height: 80%; padding: 0; }
+    PickModal .pk-main { height: 1fr; padding: 1 2; }
+    PickModal .pk-hint { color: $text-muted; height: 1; }
+    PickModal .pk-msg { height: auto; margin-bottom: 1; }
+    PickModal OptionList { height: 1fr; border: round $secondary; margin-top: 1; }
+    """
+
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
+
+    def __init__(self, title: str, items: list, *, footer_items: list | None = None, message: str = ""):
+        super().__init__()
+        self.title_text = title
+        self.items = list(items)
+        self.footer_items = list(footer_items or [])
+        self.message = message
+        self._visible: list = []
+
+    def compose(self):
+        with Vertical(classes="modal-box"):
+            yield Static(Text(self.title_text, style="bold"), classes="modal-title")
+            with Vertical(classes="pk-main"):
+                if self.message:
+                    yield Static(self.message, classes="pk-msg")
+                yield Input(placeholder="输入以筛选…", compact=True, id="pk-search")
+                yield OptionList(id="pk-list", markup=False)
+                yield Static(HINT_PICK, classes="pk-hint")
+            with Horizontal(classes="btn-row"):
+                yield Button("取消", id="pk-cancel", variant="default")
+                yield Button("选择", id="pk-ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self._rebuild("")
+        self.query_one("#pk-search", Input).focus()
+
+    def _rebuild(self, needle: str) -> None:
+        data = filter_fuzzy(self.items, needle, lambda it: it.display())
+        self._visible = data + self.footer_items
+        ol = self.query_one("#pk-list", OptionList)
+        ol.clear_options()
+        ol.add_options([Option(it.display(), disabled=it.disabled) for it in self._visible])
+        if self._visible:
+            first = next((i for i, it in enumerate(self._visible) if not it.disabled), None)
+            if first is not None:
+                ol.highlighted = first
+        n = sum(1 for it in self.items if not it.disabled)
+        ol.border_title = f"{self.title_text} (共 {n})"
+
+    def _choose(self, index: int | None) -> None:
+        if index is None or not (0 <= index < len(self._visible)):
+            return
+        item = self._visible[index]
+        if not item.disabled:
+            self.dismiss(item)
+
+    @on(Input.Changed, "#pk-search")
+    def _on_search(self, event: Input.Changed) -> None:
+        self._rebuild(event.value.strip())
+
+    @on(Input.Submitted, "#pk-search")
+    def _on_submit(self, event: Input.Submitted) -> None:
+        self._choose(self.query_one("#pk-list", OptionList).highlighted)
+
+    @on(OptionList.OptionSelected)
+    def _on_pick(self, event: OptionList.OptionSelected) -> None:
+        self._choose(event.option_index)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "pk-ok":
+            self._choose(self.query_one("#pk-list", OptionList).highlighted)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 # ---------------------------------------------------------------- 表单弹窗
 
 @dataclass
 class FormField:
     name: str
     label: str
-    kind: str = "text"  # text | password | choice | switch | note
+    kind: str = "text"  # text | password | choice | switch | browse | note
     value: str = ""  # switch: "on" 表示开启
     options: list = field(default_factory=list)  # choice: list[(label, value)]
+    pick_items: Any = None  # browse / choice: list[PickItem] 或返回 list 的可调用对象
+    pick_title: str = "选择"
+    browse_label: str = "选择…"
     validator: Callable[[str], bool] | None = None
     error: str = "输入不合法"
     placeholder: str = ""
     hint: str = ""
+    show_if: Callable[[dict], bool] | None = None  # 依当前原始值决定是否渲染
+    driver: bool = False  # 值变化时触发动态字段重建
+
+
+class _FormRow(Horizontal):
+    """单个表单行（label + 控件 + hint）；抽成 widget 以支持动态增删。"""
+
+    def __init__(self, spec: FormField) -> None:
+        super().__init__(classes="frm-row")
+        self.spec = spec
+
+    def compose(self):
+        f = self.spec
+        yield Label(f.label, classes="frm-label")
+        with Vertical(classes="frm-field"):
+            if f.kind in ("text", "password"):
+                yield Input(
+                    value=f.value if f.kind == "text" else "",
+                    password=(f.kind == "password"),
+                    placeholder=(mask_secret(f.value) if f.kind == "password" else f.placeholder),
+                    compact=True,
+                    id=f"in-{f.name}",
+                )
+            elif f.kind == "browse":
+                with Horizontal(classes="frm-browse-row"):
+                    yield Input(
+                        value=f.value,
+                        placeholder=f.placeholder,
+                        compact=True,
+                        classes="frm-browse-input",
+                        id=f"in-{f.name}",
+                    )
+                    yield Button(
+                        f.browse_label, id=f"br-{f.name}", classes="frm-browse", variant="default"
+                    )
+            elif f.kind == "choice":
+                select = Select(
+                    [(lab, val) for lab, val in f.options],
+                    value=f.value if f.value else Select.NULL,
+                    allow_blank=not f.value,
+                    compact=True,
+                    id=f"se-{f.name}",
+                )
+                if f.pick_items is None:
+                    yield select
+                else:
+                    with Horizontal(classes="frm-choice-row"):
+                        yield select
+                        yield Button(
+                            f.browse_label, id=f"br-{f.name}", classes="frm-browse", variant="default"
+                        )
+            elif f.kind == "switch":
+                yield Switch(
+                    value=(str(f.value).lower() in ("on", "1", "true")),
+                    id=f"sw-{f.name}",
+                )
+            if f.hint:
+                yield Static(f.hint, classes="frm-note")
 
 
 class FormModal(ModalScreen["dict | None"]):
-    """多字段表单，三段式，返回 {name: value}；None=取消。password 留空保持原值。"""
+    """多字段表单，三段式，返回 {name: value}；None=取消。password 留空保持原值。
+
+    ``FormField.driver=True`` 的 choice 字段变化时触发 ``dynamic_fields()``，按需
+    真实增删行（remove_children + mount），不用行内 ``display`` 切换——隐藏的
+    Input 不会进入 Tab 焦点链。``show_if`` 则用于按当前原始值过滤字段。
+    """
 
     DEFAULT_CSS = """
     FormModal { align: center middle; }
-    FormModal > .modal-box { width: 92; min-height: 24; }
+    FormModal > .modal-box { width: 92; max-width: 95%; min-height: 24; }
     FormModal .frm-note { color: $text-muted; height: auto; }
     FormModal .frm-row { height: auto; margin-bottom: 1; }
     FormModal .frm-label { width: 16; height: 1; content-align: right middle; text-style: bold; margin-right: 1; }
@@ -268,6 +439,11 @@ class FormModal(ModalScreen["dict | None"]):
     FormModal .frm-err { color: $error; height: 1; }
     FormModal .frm-body { height: 1fr; padding: 1 2; }
     FormModal .frm-pad { height: 1; }
+    FormModal .frm-browse-row { height: 1; width: 1fr; layout: horizontal; }
+    FormModal .frm-browse-input { width: 1fr; }
+    FormModal .frm-choice-row { height: auto; width: 1fr; layout: horizontal; align-vertical: middle; }
+    FormModal .frm-choice-row Select { width: 1fr; }
+    FormModal .frm-browse { margin-left: 1; }
     """
 
     BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
@@ -280,44 +456,23 @@ class FormModal(ModalScreen["dict | None"]):
         self.ok_label = ok_label
         # 额外按钮：list[(id, label, variant)]，点击后以按钮 id 作为结果 dismiss
         self.extra_buttons = list(extra_buttons or [])
+        self._rebuilding = False
+        # 跨动态重建保留已删除字段的最近值（如 A→SRV→A 时恢复记录值）
+        self._value_cache: dict = {}
 
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            with VerticalScroll(classes="frm-body"):
+            with VerticalScroll(classes="frm-body", id="frm-body"):
                 if self.message:
                     yield Static(self.message, classes="frm-note")
                     yield Static("", classes="frm-pad")
-                for f in self.fields:
+                initial = {f.name: f.value for f in self.fields}
+                for f in self._visible_fields(initial):
                     if f.kind == "note":
                         yield Static(f.label, classes="frm-note")
-                        continue
-                    with Horizontal(classes="frm-row"):
-                        yield Label(f.label, classes="frm-label")
-                        with Vertical(classes="frm-field"):
-                            if f.kind in ("text", "password"):
-                                yield Input(
-                                    value=f.value if f.kind == "text" else "",
-                                    password=(f.kind == "password"),
-                                    placeholder=(mask_secret(f.value) if f.kind == "password" else f.placeholder),
-                                    compact=True,
-                                    id=f"in-{f.name}",
-                                )
-                            elif f.kind == "choice":
-                                yield Select(
-                                    [(lab, val) for lab, val in f.options],
-                                    value=f.value if f.value else Select.NULL,
-                                    allow_blank=not f.value,
-                                    compact=True,
-                                    id=f"se-{f.name}",
-                                )
-                            elif f.kind == "switch":
-                                yield Switch(
-                                    value=(str(f.value).lower() in ("on", "1", "true")),
-                                    id=f"sw-{f.name}",
-                                )
-                            if f.hint:
-                                yield Static(f.hint, classes="frm-note")
+                    else:
+                        yield _FormRow(f)
             yield Static("", classes="frm-err", id="frm-error")
             yield HintBar("", classes="page-hint", id="frm-hint")
             with Horizontal(classes="btn-row"):
@@ -327,9 +482,11 @@ class FormModal(ModalScreen["dict | None"]):
                     yield Button(label, id=bid, variant=variant)
 
     def on_mount(self) -> None:
-        first_input = self.query(Input)
-        if first_input:
-            first_input.first().focus()
+        for widget_type in (Input, Select, Switch):
+            found = self.query(widget_type)
+            if found:
+                found.first().focus()
+                break
         self._refresh_hint()
 
     def on_descendant_focus(self, event) -> None:
@@ -339,7 +496,9 @@ class FormModal(ModalScreen["dict | None"]):
         self._refresh_hint()
 
     def _refresh_hint(self) -> None:
-        if not self.is_mounted:
+        try:
+            hint = self.query_one("#frm-hint", HintBar)
+        except NoMatches:
             return
         focused = self.app.focused
         if isinstance(focused, TextArea):
@@ -348,23 +507,174 @@ class FormModal(ModalScreen["dict | None"]):
             text = HINT_FORM_EDIT
         else:
             text = HINT_FORM
-        self.query_one("#frm-hint", HintBar).update(text)
+        hint.update(text)
+
+    # ------------------------------------------------------------ 动态字段
+
+    def dynamic_fields(self, values: dict) -> list | None:
+        """driver 字段变化后返回新的字段列表；None 表示字段不变。子类覆写。"""
+        return None
+
+    def _visible_fields(self, values: dict) -> list:
+        out = []
+        for f in self.fields:
+            if f.show_if is not None and not f.show_if(values):
+                continue
+            out.append(f)
+        return out
+
+    def _snapshot(self) -> dict:
+        """读取当前控件原始值；用于重建前保存、show_if 判断与 _collect。"""
+        values = dict(self._value_cache)
+        for f in self.fields:
+            if f.kind == "note":
+                continue
+            try:
+                if f.kind == "choice":
+                    val = self.query_one(f"#se-{f.name}", Select).value
+                    values[f.name] = "" if val is Select.NULL else str(val)
+                elif f.kind == "switch":
+                    values[f.name] = bool(self.query_one(f"#sw-{f.name}", Switch).value)
+                else:
+                    values[f.name] = self.query_one(f"#in-{f.name}", Input).value
+            except NoMatches:
+                values[f.name] = self._value_cache.get(f.name, f.value)
+        self._value_cache = dict(values)
+        return values
+
+    def _apply_values(self, values: dict) -> None:
+        for f in self.fields:
+            if f.kind == "note" or f.name not in values:
+                continue
+            val = values[f.name]
+            if f.kind == "switch":
+                f.value = "on" if val else ""
+            elif f.kind == "choice":
+                f.value = "" if val in (None, "") else str(val)
+            elif f.kind == "password" and not val:
+                continue
+            else:
+                f.value = str(val)
+
+    async def rebuild_fields(self, values: dict) -> None:
+        """按 values 重建表单行：保留同名字段值、清空错误、聚焦 driver。"""
+        self._rebuilding = True
+        try:
+            new_fields = self.dynamic_fields(values)
+            if new_fields is not None:
+                self.fields = list(new_fields)
+            self._apply_values(values)
+            body = self.query_one("#frm-body", VerticalScroll)
+            await body.remove_children()
+            widgets = []
+            if self.message:
+                widgets.append(Static(self.message, classes="frm-note"))
+                widgets.append(Static("", classes="frm-pad"))
+            for f in self._visible_fields(values):
+                if f.kind == "note":
+                    widgets.append(Static(f.label, classes="frm-note"))
+                else:
+                    widgets.append(_FormRow(f))
+            await body.mount_all(widgets)
+            self.show_error("")
+            driver = next((f.name for f in self.fields if f.driver), None)
+            self.call_after_refresh(lambda: self._focus_field(driver))
+        finally:
+            self.call_after_refresh(self._clear_rebuilding)
+
+    def _clear_rebuilding(self) -> None:
+        self._rebuilding = False
+
+    def _focus_field(self, name: str | None) -> None:
+        if name:
+            for widget_id in (f"#se-{name}", f"#in-{name}", f"#sw-{name}"):
+                try:
+                    self.query_one(widget_id).focus()
+                    return
+                except NoMatches:
+                    continue
+        for widget_type in (Input, Select, Switch):
+            found = self.query(widget_type)
+            if found:
+                found.first().focus()
+                return
+
+    def _field_for_select(self, select: Select) -> FormField | None:
+        widget_id = select.id or ""
+        if not widget_id.startswith("se-"):
+            return None
+        name = widget_id[3:]
+        return next((f for f in self.fields if f.name == name), None)
+
+    @on(Select.Changed)
+    async def _on_form_select_changed(self, event: Select.Changed) -> None:
+        if self._rebuilding:
+            return
+        field = self._field_for_select(event.select)
+        if field is None or not field.driver:
+            return
+        new_value = "" if event.value is Select.NULL else str(event.value)
+        if str(field.value) == new_value:
+            return
+        values = self._snapshot()
+        values[field.name] = new_value
+        await self.rebuild_fields(values)
+
+    # ------------------------------------------------------------ 浏览选择
+
+    @on(Button.Pressed, ".frm-browse")
+    def _on_browse(self, event: Button.Pressed) -> None:
+        name = (event.button.id or "")[len("br-"):]
+        f = next((x for x in self.fields if x.name == name), None)
+        if f is None or f.pick_items is None:
+            return
+        items = f.pick_items() if callable(f.pick_items) else f.pick_items
+        self.app.push_screen(
+            PickModal(f.pick_title, items),
+            lambda item: self._browse_picked(f.name, item),
+        )
+
+    def _browse_picked(self, name: str, item: PickItem | None) -> None:
+        if item is None:
+            return
+        f = next((x for x in self.fields if x.name == name), None)
+        if f is None:
+            return
+        if f.kind == "choice":
+            code = str(item.value)
+            options = [(lab, val) for lab, val in f.options]
+            if code not in [str(val) for _, val in options]:
+                options.append((item.label, code))
+            f.options = options
+            try:
+                select = self.query_one(f"#se-{name}", Select)
+                select.set_options(options)
+                select.value = code
+            except NoMatches:
+                pass
+        else:
+            try:
+                self.query_one(f"#in-{name}", Input).value = str(item.value)
+            except NoMatches:
+                pass
+
+    # ------------------------------------------------------------ 收集 / 提交
 
     def _collect(self) -> dict | None:
         """收集表单值；校验失败时写入错误信息并返回 None。可在子类扩展。"""
         err_box = self.query_one("#frm-error", Static)
         err_box.update(Text(""))
+        values = self._snapshot()
         out = {}
-        for f in self.fields:
+        for f in self._visible_fields(values):
             if f.kind == "note":
                 continue
             if f.kind == "choice":
-                val = self.query_one(f"#se-{f.name}", Select).value
-                val = "" if val is Select.NULL else str(val)
+                val = str(values.get(f.name, ""))
             elif f.kind == "switch":
-                val = bool(self.query_one(f"#sw-{f.name}", Switch).value)
+                val = bool(values.get(f.name, False))
             else:
-                val = self.query_one(f"#in-{f.name}", Input).value
+                val = str(values.get(f.name, ""))
                 if f.kind == "password":
                     if not val and f.value:
                         val = f.value  # 密码留空保持原值
@@ -392,6 +702,9 @@ class FormModal(ModalScreen["dict | None"]):
                 self.dismiss(data)
         elif bid == "frm-cancel":
             self.dismiss(None)
+        elif event.button.has_class("frm-browse"):
+            # 选择按钮由 _on_browse 处理（弹出 PickModal），不得走额外按钮分支
+            event.stop()
         else:
             # 额外按钮：以按钮 id 作为结果返回，由调用方解释
             self.dismiss(bid)
@@ -407,7 +720,7 @@ class OutputModal(ModalScreen[None]):
 
     DEFAULT_CSS = """
     OutputModal { align: center middle; }
-    OutputModal > .modal-box { width: 100; height: 90%; }
+    OutputModal > .modal-box { width: 100; max-width: 95%; height: 90%; }
     OutputModal .out-body { height: 1fr; border: none; padding: 0 1; }
     """
 
@@ -909,7 +1222,7 @@ async def busy(app, message: str = "正在处理…", *, mode: str = "dots", tot
 
 
 __all__ = [
-    "ConfirmModal", "InputModal", "FormField", "FormModal", "OutputModal",
+    "ConfirmModal", "InputModal", "PickItem", "PickModal", "FormField", "FormModal", "OutputModal",
     "ClickTable", "make_table", "load_rows", "filter_fuzzy", "fuzzy_score",
     "shorten", "rcell", "fit_table_columns",
     "ProgressCover", "BusyOverlay", "busy",

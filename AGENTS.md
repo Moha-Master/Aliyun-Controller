@@ -2,7 +2,7 @@
 
 # 第一部分 · UI 开发统一规范
 
-> 本部分在 aliyun-controller、`../clash-controller`、`../litellm-controller`、`../llm-price-compare` 四项目间**保持同一份文本**（个别差异会显式标注）。任何一侧修订必须同步其余项目，保证各项目的 Agent 拿到相同标准。
+> 本部分在 aliyun-controller、`../clash-controller`、`../litellm-controller`、`../llm-price-compare`、`../yt-dlp-controller` 五项目间**保持同一份文本**（个别差异会显式标注；§7.1 键位对照与 §14 组件对照表目前只覆盖前四个项目）。任何一侧修订必须同步其余项目，保证各项目的 Agent 拿到相同标准。
 > 依据均为本地 Textual 8.2.8 实测结论，逐条验证记录见 `docs/textual-dev-guide.md`。
 
 ## 1. 技术栈与代码质量
@@ -50,9 +50,10 @@
 - **`Button` 全局单行**：各项目 `app.tcss` 统一 `Button { height: 1; border: none; min-width: 0; padding: 0 1 }` + `Button:focus { text-style: bold reverse }`（等价于旧 `compact=True`，调用处不再传）；变体色（primary/error/…）即背景色。**同属性下 app.tcss 元素规则会压过一切 widget `DEFAULT_CSS` 类/ID 规则**，加全局控件样式前必须审查小尺寸控件（见 §12）。
 - 全部模态为 `ModalScreen[T]`，统一三段式：`.modal-title`（`border-bottom: hkey`）→ 内容区 → `.btn-row`（`border-top: hkey; dock: bottom; align-horizontal: right`）。
 - 按钮语义：default=一般、primary=推荐、error=危险；顺序 `[取消] [主操作] … [危险放最右]`。
-- `ConfirmModal`：回车=确认；不可逆操作 `default_yes=False`（确认按钮变 error 色、回车不再直接放行按钮，仅按钮点击生效）。
+- `ConfirmModal`：**回车 = 触发当前焦点按钮**（不再无条件确认）。可逆操作 `default_yes=True`：`on_mount` 聚焦「确认」，回车即确认；不可逆操作 `default_yes=False`：确认按钮变 error 色且 `on_mount` 聚焦「取消」——回车仍然响应（等于放弃），必须 Tab 到「确认」或直接点击才放行。`on_key` 里不要再拦回车。
 - `InputModal`：单行 + validator，留空=不更改语义由调用方决定；`[取消][确定]`。
-- `FormModal`：字段 `kind: text | password | choice | switch | note`（clash/litellm 另有 `textarea` 供长文本如私钥；litellm 另有 `browse`：Input + 「选择…」弹 `PickModal` 回填）。
+- `FormModal`：字段 `kind: text | password | choice | switch | browse | note`（clash/litellm 另有 `textarea` 供长文本如私钥；`browse` = Input + 「选择…」弹 `PickModal` 回填，`choice` 也可带 `pick_items` 在 Select 旁加「更多…」按钮）。
+  - 动态字段：`FormField.show_if: Callable[[dict], bool]` 按当前原始值过滤；`FormField.driver=True` 的 choice 变化时调用 `dynamic_fields()`，由 `FormModal.rebuild_fields()` 用 `remove_children()` + `mount_all()` **真实增删行**（保留同名字段值、清空 `#frm-error`、重建后聚焦 driver）。**严禁用行内 `display` 切换**（隐藏 Input 不进 Tab 焦点链）。
 - 字段过多的复合表单（如模型参数、路由组成员勾选）用 **sheet 式模态**：`ModalScreen` + `.modal-box` 定宽（≤104）/ `height 88~90%` + `.modal-title` + `VerticalScroll` 内容 + docked `.btn-row`；不拆多步问询弹窗串联。Input/Select 一律 `compact=True`；`.frm-row { margin-bottom: 1 }`、无 hint 行高恰好 1；`.modal-box { min-height: 24 }`；底部错误行 `#frm-error`（validator 失败提示且不关闭）。
   - 密码框：占位符使用 `widgets.mask_secret()` 脱敏显示，**留空 = 保持原值**。
   - 布尔开关：表单内 `kind="switch"`（Switch 用 `border: none; height: 1` 压单行），**不要**独立动作按钮、不要 Checkbox。
@@ -60,6 +61,8 @@
   - `extra_buttons`（按按钮 id 返回结果）与功能型按钮必须互斥：如 litellm 的 `browse`「选择…」按钮在 `on_button_pressed` 里按 `.frm-browse` 类名排除，否则会被当额外按钮误 dismiss（历史事故：编辑 Upstream provider 崩溃）。
   - 焦点：`on_mount` 聚焦第一个字段；Tab/Shift+Tab 轮切（Screen 原生焦点链）；Enter（Input.Submitted）= 提交；Esc / Ctrl+C = 取消。
 - `OutputModal`：只读长文本，VerticalScroll + `[关闭]`。
+- `PickModal`（从 litellm 移植）：模糊筛选单选列表，`ModalScreen[PickItem | None]`，搜索框 + OptionList + `HINT_PICK` + docked `.btn-row`；`PickItem.display()` 参与模糊匹配，`disabled` 项不可选。
+- **定宽 `.modal-box` 必须有窄屏兜底**：写成 `width: 92; max-width: 95%`（aliyun/clash/litellm/lpc 现状）或 `width: 90%; max-width: 92`（yt-dlp 写法）皆可，禁止裸 `width: N`——固定宽度在窄终端（<100 列）会顶破屏幕。改完必须实测窄屏 `region.right <= screen.width`。
 - **不要用行内 `display` 切换做就地编辑**——隐藏 Input 不进 Tab 焦点链、编辑态难以退出（已被否，用 FormModal）。
 - 调用：worker 内 `await app.push_screen_wait(modal)`；事件回调里 `app.push_screen(modal, callback)`。
 
@@ -69,7 +72,7 @@
 |---|---|
 | `↑↓←→` | 移动焦点/光标 |
 | `Tab` / `Shift+Tab` | 轮切焦点（表单内轮切字段） |
-| `Enter` | 确认 / 提交 / 执行所选行 |
+| `Enter` | 确认 / 提交 / 执行所选行（确认框里 = **当前焦点按钮**，见 §6） |
 | `Esc` / `Ctrl+C` | 关闭层级：**浮层 > 模态 > 返回上一页**；**根屏 / 主菜单为退出程序**（Textual 无默认 Esc，每屏必须自绑） |
 | `Ctrl+Q` | **任意界面**直接退出程序（App priority 绑定，浮层 / 模态 / 输入态均生效） |
 | `Home/End/PgUp/PgDn` | 功能页（PageScreen）滚动（不抢 Input 的文本导航） |
@@ -198,8 +201,8 @@
 | `ui.PageScreen` / `ui.LOGO_*` | ✅ | ✅ | ✅ | ✅（PageScreen 骨架；看板根屏无 LOGO） |
 | `ui.MonthPicker` / `ui.QuotaBar` | ✅（账期/额度场景） | ➖ 无场景未搬运 | ➖ 无场景未搬运 | ➖ 无场景未搬运 |
 | `widgets.ClickTable` / `HintBar` / `MenuMarquee` / `shorten` / `rcell` / `fit_table_columns` | ✅ | ✅ | ✅ | ✅（全套辅助；看板表自适应列宽） |
-| `widgets` 四模态 | ✅（FormModal 无 textarea） | ✅（FormModal 多 `textarea` kind） | ✅（FormModal 多 `textarea` + `browse` 字段） | ✅（FormModal 无 textarea；设置页派生动态 pricing） |
-| `PickModal` / `MultiPickModal` 选择弹窗 | ➖ | ➖ | ✅（litellm 特有：项目选择 / 模糊多选） | ➖ |
+| `widgets` 四模态 | ✅（FormModal 无 textarea，另有 `browse` / `show_if` / 动态字段） | ✅（FormModal 多 `textarea` kind） | ✅（FormModal 多 `textarea` + `browse` 字段） | ✅（FormModal 无 textarea；设置页派生动态 pricing） |
+| `PickModal` / `MultiPickModal` 选择弹窗 | ✅（`PickModal`；`MultiPickModal` 未移植） | ➖ | ✅（litellm 特有：项目选择 / 模糊多选） | ➖ |
 | sheet 式大表单（ModalScreen） | ➖ | ➖（用 FormModal 足够） | ✅（ModelFormScreen / GroupFormScreen / ModelMetaFormScreen） | ➖（用 FormModal 足够） |
 | 模糊筛选 `filter_fuzzy` | ✅ | ✅ | ✅ | ✅ |
 
@@ -248,7 +251,7 @@ aliyun_controller/
 
 - 首页：5 菜单项（流量/账单/DNS/设置/退出），数字快捷键 1-5；版本号跟随 `ui.home_col_width()` 动态列宽右对齐 Logo 右缘，菜单描述右对齐、超宽走 `MenuMarquee`；`Esc`/`Ctrl+C` 退出程序（不绑 `q`）。
 - 账单/流量页：上小下大——汇总 `.panel`（含 `ui.QuotaBar` 与刷新按钮）+ 明细 `.tbl`；账期切换在顶栏 `ui.MonthPicker`（Changed 消息自动重查）。
-- DNS 域名页/记录页：`.panel` 小容器（搜索框 + 排序 Select + 增删改按钮）+ ClickTable（双击行进记录页/开编辑弹窗）；列 cap：主机记录 20、记录值 40；TTL/状态右对齐 rcell。
+- DNS 域名页/记录页：`.panel` 小容器（搜索框 + 排序 Select + 增删改按钮）+ ClickTable（双击行进记录页/开编辑弹窗）；列 cap：主机记录 20、线路 14、记录值 40；TTL/状态右对齐 rcell。记录表单按类型动态渲染：线路（一级 Select + 「更多线路…」PickModal）、MX 优先级、权重（仅 A/AAAA/CNAME/ALIAS）、备注、TTL 档位；SRV/CAA/TLSA/SVCB/HTTPS/URL 使用结构化多栏并在提交时拼成单个 `Value`。
 - 设置页：单 `.panel` 容器 kv 行（配置文件路径 / AK / Secret，均脱敏）→ 容器右下角 `[编辑访问密钥]` 打开 FormModal（ID 预填、Secret 密码框 placeholder 脱敏且留空=不变、Tab 轮切、保存/取消）；保存后 `app.reload_config()` 立即生效。
 - 首次启动/配置损坏进入 `screens/setup.py` 向导屏。
 - 文本编辑模式：DNS 域名页/记录页搜索框聚焦时 `#page-hint` 切为 `EDIT_HINT` 并禁用 `Ctrl+R`；`FormModal`/`InputModal` 底部 `#frm-hint`/`#im-hint` 按焦点类型切换 `HINT_FORM`/`HINT_FORM_EDIT`/`HINT_FORM_TA`（详见第一部分 §7.2）。
@@ -272,6 +275,10 @@ aliyun_controller/
 - 账单屏的结果方法叫 `_show_result` / `_show_error`（`_render` 陷阱的具体案例）。
 - MonthPicker 浮层常量 `POP_WIDTH = 26` 与 CSS `#mp-pop width` 必须一致；全局单行按钮生效后其网格按钮为 `width: 6`（含 padding/line-pad）、方向键 `width: 5`。
 - 单元格点击行/列从 `event.style.meta["row"/"column"]` 取；ClickTable 用「`Coordinate == cursor_coordinate` 则不再二次处理」避免与原生双击/回车重复。
+- `UpdateDomainRecord` 是**整条覆盖**语义：`Line` / `Priority` 不传会被重置为 `default` / 空。编辑时必须把 `line` 与 MX 的 `priority` 一起传回（`record_content_changed()` 也扩展了这两个比较维度）。
+- 隐性 URL 的官方拼写存在 `FORWARD_URL` / `FORWORD_URL` 两种，读取已有记录时用 `normalize_record_type()` 归一化，避免编辑时类型丢失。
+- 设置权重前本地要求「同主机记录 + 同线路存在 ≥2 条**可加权**记录（A/AAAA/CNAME/ALIAS）」——同名 TXT/MX 记录不计入，否则服务端会拒绝；权重与整组开关分两次调用（`SetDNSSLBStatus` 幂等 → `UpdateDNSSLBWeight`），故 `weight` 留空 = 不修改。
+- 记录表单切换类型会真实增删行（`rebuild_fields`）：driver 之外的 Select（如线路）变化不触发重建；`_value_cache` 负责 A→SRV→A 往返时找回原记录值。
 
 ## 依赖与质量
 
@@ -280,7 +287,7 @@ aliyun_controller/
 
 ## 验证（本项目脚本）
 
-- `/tmp/opencode/aliyun_ui_check2.py`（35 断言：取数流程/键位/Esc 层级）、`/tmp/opencode/aliyun_ui_check3.py`（48 断言：月份浮层/ClickTable/列宽/QuotaBar/设置弹窗），可作新脚本模板。
+- `/tmp/opencode/aliyun_ui_check2.py`（35 断言：取数流程/键位/Esc 层级）、`/tmp/opencode/aliyun_ui_check3.py`（48 断言：月份浮层/ClickTable/列宽/QuotaBar/设置弹窗）、`/tmp/opencode/dns_form_check.py`（395 断言：类型动态字段/结构值拼装/线路 PickModal/保存编排/三层 Esc）、`/tmp/opencode/dns_status_check.py`（5 条保存差异分流）、`/tmp/opencode/dns_review_check.py`（45 断言：线路/优先级保留回归、冲突预检、权重前提、多次类型切换、窄屏版面）、`/tmp/opencode/dns_shared_check.py`（28 断言：共享 widgets 重构后设置页/首页/账单页/四模态回归）、`/tmp/opencode/confirm_focus_check.py`（10 断言：ConfirmModal 焦点回车语义 + 删除链路）、`/tmp/opencode/aliyun_narrow_modal_check.py`（20 断言：60/80 列下五类模态 max-width 兜底），可作新脚本模板。
 - 做法：`ALIYUN_CONTROLLER_CONFIG_DIR` 指向临时目录并写 `config.yaml`；`app._billing = FakeBilling(); app._dns = FakeDns()` 屏蔽网络。
 
 ## 提交

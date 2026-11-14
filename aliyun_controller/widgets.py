@@ -786,8 +786,11 @@ class HintBar(ScrollableContainer):
         self._text = text
         self._direction = 1
         self._hold = 0
-        if self.is_mounted:
-            self.query_one(".hint-text", Static).update(Text(text, no_wrap=True))
+        # 注意：不能用 is_mounted 判定——切屏 / 退出时父件 is_mounted 仍可能为 True
+        # 而子件已先行卸载，此时 query_one 会抛 NoMatches。
+        with contextlib.suppress(NoMatches):
+            inner = self.query_one(".hint-text", Static)
+            inner.update(Text(text, no_wrap=True))
             self.scroll_x = 0
 
     def _tick(self) -> None:

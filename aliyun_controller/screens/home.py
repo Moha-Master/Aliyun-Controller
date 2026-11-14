@@ -12,7 +12,7 @@ from ..widgets import HintBar, MenuMarquee
 
 
 class HomeScreen(Screen):
-    """功能主菜单：流量 / 账单 / DNS / 设置 / 退出。"""
+    """功能主菜单：流量 / 账单 / DNS / 云服务器 ECS / 设置 / 退出。"""
 
     def __init__(self) -> None:
         super().__init__(classes="logo-page")
@@ -22,14 +22,16 @@ class HomeScreen(Screen):
         Binding("1", "menu('traffic')", "流量", show=False),
         Binding("2", "menu('billing')", "账单", show=False),
         Binding("3", "menu('dns')", "DNS", show=False),
-        Binding("4", "menu('settings')", "设置", show=False),
-        Binding("5", "menu('quit')", "退出", show=False),
+        Binding("4", "menu('ecs')", "云服务器 ECS", show=False),
+        Binding("5", "menu('settings')", "设置", show=False),
+        Binding("6", "menu('quit')", "退出", show=False),
     ]
 
     ITEMS = [
         ("traffic", "流量查询", "查询指定月份公网流出流量"),
         ("billing", "账单归纳", "按产品归纳指定月份消费"),
         ("dns", "DNS 解析管理", "域名解析记录增删改查"),
+        ("ecs", "云服务器 ECS", "实例开关机 · 详情 · 监控 · 安全组规则"),
         ("settings", "设置", "查看 / 修改阿里云访问密钥"),
         ("quit", "退出程序", "保存配置并退出"),
     ]
@@ -41,7 +43,7 @@ class HomeScreen(Screen):
                 yield Static(Text("Aliyun Controller", style="bold"), id="home-plain")
                 yield Static(f"v{__version__}", id="home-version")
                 yield OptionList(id="home-list")
-        yield HintBar("↑↓ 选择 · 回车 进入 · 1-5 直达 · Esc/Ctrl+C 退出", classes="page-hint")
+        yield HintBar("↑↓ 选择 · 回车 进入 · 1-6 直达 · Esc/Ctrl+C 退出", classes="page-hint")
 
     def on_mount(self) -> None:
         ol = self.query_one("#home-list", OptionList)
@@ -68,6 +70,7 @@ class HomeScreen(Screen):
     def _open(self, key: str) -> None:
         from .billing import SummaryScreen, TrafficScreen
         from .dns import DomainListScreen
+        from .ecs import RegionListScreen
         from .settings import SettingsScreen
 
         if key == "traffic":
@@ -76,6 +79,8 @@ class HomeScreen(Screen):
             self.app.push_screen(SummaryScreen())
         elif key == "dns":
             self.app.push_screen(DomainListScreen())
+        elif key == "ecs":
+            self.app.push_screen(RegionListScreen())
         elif key == "settings":
             self.app.push_screen(SettingsScreen())
         elif key == "quit":

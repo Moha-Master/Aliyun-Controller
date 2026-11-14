@@ -12,6 +12,8 @@ from textual.widgets import Static
 from .billing import AliCloudBssQuerier
 from .config import config_exists, load_config
 from .dns import AliCloudDnsQuerier
+from .ecs import EcsQuerier
+from .monitor import MonitorQuerier
 from .widgets import ProgressCover
 
 _DOTS = SPINNERS["dots"]
@@ -78,6 +80,8 @@ class AliyunControllerApp(App):
         self.config: dict | None = None
         self._billing: AliCloudBssQuerier | None = None
         self._dns: AliCloudDnsQuerier | None = None
+        self._ecs: EcsQuerier | None = None
+        self._monitor: MonitorQuerier | None = None
 
     # ------------------------------------------------------------ 全局资源
 
@@ -91,10 +95,22 @@ class AliyunControllerApp(App):
             self._dns = AliCloudDnsQuerier()
         return self._dns
 
+    def get_ecs(self) -> EcsQuerier:
+        if self._ecs is None:
+            self._ecs = EcsQuerier()
+        return self._ecs
+
+    def get_monitor(self) -> MonitorQuerier:
+        if self._monitor is None:
+            self._monitor = MonitorQuerier()
+        return self._monitor
+
     def invalidate_clients(self) -> None:
         """连接参数变化后重建客户端。"""
         self._billing = None
         self._dns = None
+        self._ecs = None
+        self._monitor = None
 
     def reload_config(self) -> None:
         self.config = load_config()

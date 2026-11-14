@@ -180,6 +180,7 @@
 - 自定义 `DataTable` 子类重写 `_on_click`：Textual 沿 MRO 逐类派发，接管与回落两条路径都要 `event.prevent_default()`，否则消息双发/双执行。
 - 屏幕方法不要命名 `_render`（覆盖 `Widget._render` 渲染崩溃）。
 - `on_mount` 回调里 `is_mounted` **仍是 `False`**（Textual 是派发完 Mount 事件**之后**才置位）：靠它守卫的写入会静默跳过（历史事故：`PageScreen.set_subtitle()` 写 `if self.is_mounted:` → 首屏顶栏副标题永远空白）。这类判定改用**控件是否已组合**（`try: query_one(...) except NoMatches: ...`）或 `call_after_refresh`，不要依赖 `is_mounted`。
+- **反向陷阱同样存在**：`TabbedContent` 各 `TabPane` 的内容是**分阶段挂载**的，且卸载时**子件先于父件消失**——父件 `is_mounted` 仍为 `True` 时 `query_one(子件)` 会抛 `NoMatches`（历史事故：详情页 worker 起手 `query_one("#dt-sg-table")`、`HintBar.update()` 用 `if self.is_mounted` 守卫，在「进入即切页签 / App 正在退出」时崩）。规则：**任何跨层级的 `query_one` 都要 `try/except NoMatches`**，判定「查得到与否」而不是「挂没挂载」；表格类可选查询用 `screens/ecs.py::_find_table()` 这种返回 `None` 的包装。
 - **级联优先级**：app.tcss（含 Screen CSS）对同一属性**始终压过** widget 自身 `DEFAULT_CSS`，与选择器特异度无关——给通用控件写全局规则前，先 grep 各控件 DEFAULT_CSS 里对该控件的 width/padding 定制（历史事故：全局 `Button{padding:0 1}` 掀翻 MonthPicker 3 格小按钮，rich `chop_cells` 除零崩溃）。
 - `#topbar Button { margin }` 这类**后代选择器**会命中挂在顶栏里的组件内部按钮（MonthPicker 弹层等），且 id 前缀特异度压过 widget 类规则；顶栏间距规则必须限定到具体 id（`#topbar #top-back`）。
 - `OptionList` 的 `DEFAULT_CSS` 自带 `border: tall $border-blurred`（直角框）。放进 `.panel` 圆角容器时必须显式 `border: none; background: transparent`（如 `#mh-list`），否则容器内套一个直角方框。
@@ -239,18 +240,20 @@ aliyun_controller/
   client.py    AliyunApiError / format_api_error / build_open_api_config
   billing.py   账单服务层（BSS OpenAPI，返回结构化数据含明细行）
   dns.py       DNS 服务层（Alidns）
+  ecs.py       ECS 服务层（地域探测 / 实例生命周期 / 安全组规则 / 磁盘）
   ui.py        界面骨架：PageScreen / MonthPicker / QuotaBar / logo 常量（8.x 特性集中在这里）
   widgets.py   模态（ConfirmModal/InputModal/FormModal/OutputModal）+ 表格与模糊筛选辅助
   app.tcss     全局样式（模态三段式、顶栏、quota-bar、home banner、状态栏）
-  screens/     home / setup / settings / billing / dns
+  screens/     home / setup / settings / billing / dns / ecs
 ```
 
 分层与服务约定见第一部分 §2；本项目服务层失败统一抛 `AliyunApiError`（数据不合法抛 `ValueError`）。
 
 ## 本项目界面实例（对第一部分规范的映射）
 
-- 首页：5 菜单项（流量/账单/DNS/设置/退出），数字快捷键 1-5；版本号跟随 `ui.home_col_width()` 动态列宽右对齐 Logo 右缘，菜单描述右对齐、超宽走 `MenuMarquee`；`Esc`/`Ctrl+C` 退出程序（不绑 `q`）。
+- 首页：6 菜单项（流量/账单/DNS/云服务器/设置/退出），数字快捷键 1-6；版本号跟随 `ui.home_col_width()` 动态列宽右对齐 Logo 右缘，菜单描述右对齐、超宽走 `MenuMarquee`；`Esc`/`Ctrl+C` 退出程序（不绑 `q`）。
 - 账单/流量页：上小下大——汇总 `.panel`（含 `ui.QuotaBar` 与刷新按钮）+ 明细 `.tbl`；账期切换在顶栏 `ui.MonthPicker`（Changed 消息自动重查）。
+- 云服务器：地域页（`RegionListScreen` 并发探测有实例的地域，仅 1 个时 `switch_screen` 自动进入）→ 实例列表（搜索 + 首列「选」与 `空格` 标记 + 状态门控的 `[详情][标记][全选][清空][批量开/关/重启][开机][关机][重启]` + 折叠菜单放强制操作/切换地域/安全组管理）→ 实例详情（`TabbedContent` 四个页签，顺序固定为「基本信息 / 监控 / 网络与安全组 / 存储与备份」：基本信息 kv（名称 / 状态 / 规格 / 镜像 / 可用区 / 锁定原因 + `[开机][关机][重启][执行命令]` 按钮行） → 其下「监控」读数卡（CPU / 内存 / 磁盘 最新值 + 不可用原因）→ 网络 kv（IP / EIP 带宽 / VPC / 交换机 / 关联安全组 + `[调整带宽]`）→ 计费与时间；监控页（时间窗 + 三条占用条 + braille 折线图 + 光标读数）；网络与安全组表；存储与备份磁盘表）→ 安全组列表（新建 / 删除）→ 规则页（方向 Select + 搜索 + 增删改；编辑用 FormModal 动态字段）。关机统一先弹 `StopOptionsModal`（正常/强制 + 节省停机/保留实例），批量关机复用同一模态；批量操作全部到位才 `notify_ok`，否则 `OutputModal` 列出已到位 / 未到位 / 下发失败明细。
 - DNS 域名页/记录页：`.panel` 小容器（搜索框 + 排序 Select + 增删改按钮）+ ClickTable（双击行进记录页/开编辑弹窗）；列 cap：主机记录 20、线路 14、记录值 40；TTL/状态右对齐 rcell。记录表单按类型动态渲染：线路（一级 Select + 「更多线路…」PickModal）、MX 优先级、权重（仅 A/AAAA/CNAME/ALIAS）、备注、TTL 档位；SRV/CAA/TLSA/SVCB/HTTPS/URL 使用结构化多栏并在提交时拼成单个 `Value`。
 - 设置页：单 `.panel` 容器 kv 行（配置文件路径 / AK / Secret，均脱敏）→ 容器右下角 `[编辑访问密钥]` 打开 FormModal（ID 预填、Secret 密码框 placeholder 脱敏且留空=不变、Tab 轮切、保存/取消）；保存后 `app.reload_config()` 立即生效。
 - 首次启动/配置损坏进入 `screens/setup.py` 向导屏。
@@ -279,6 +282,28 @@ aliyun_controller/
 - 隐性 URL 的官方拼写存在 `FORWARD_URL` / `FORWORD_URL` 两种，读取已有记录时用 `normalize_record_type()` 归一化，避免编辑时类型丢失。
 - 设置权重前本地要求「同主机记录 + 同线路存在 ≥2 条**可加权**记录（A/AAAA/CNAME/ALIAS）」——同名 TXT/MX 记录不计入，否则服务端会拒绝；权重与整组开关分两次调用（`SetDNSSLBStatus` 幂等 → `UpdateDNSSLBWeight`），故 `weight` 留空 = 不修改。
 - 记录表单切换类型会真实增删行（`rebuild_fields`）：driver 之外的 Select（如线路）变化不触发重建；`_value_cache` 负责 A→SRV→A 往返时找回原记录值。
+- ECS 没有「全地域实例总数」API：`discover_regions()` 先用 `DescribeRegions` 取地域，再用 8 线程并发 `DescribeInstances(max_results=10)` 读 `total_count`；结果只缓存在 `EcsQuerier._discovery`（进程内），`invalidate_discovery()` 清空。
+- ECS 无 waiter：启停重启后必须自行 `DescribeInstanceStatus` 轮询（每页 ≤50、无 `next_token`）；超时返回最后状态，界面提示「已下发」而非成功。重启后先进 `Starting`，目标态是 `Running`。
+- 安全组规则明细只能从 `DescribeSecurityGroupAttribute` 取（默认 500 条/页，必须显式 `max_results=1000` + 翻 `next_token`，且 `max_results` 最小 10）；`DescribeSecurityGroups` 只有规则计数。
+- **`DescribeSecurityGroups` 不支持 `SecurityGroupIds`（复数、逗号分隔）**：传了会被服务端判为 `InvalidParameter (HTTP 400) The specified parameters are not valid.`，只能传单个 `SecurityGroupId`。需要按多个 ID 过滤时逐个查询再合并（`_page_security_groups(region, sg_id)`）。
+- 修改规则是「按 rule_id 改单条」但未传字段可能被重置（Priority 默认 1）→ 必须读-改-写全量回填；不能改授权对象类型（CIDR ↔ 安全组、IPv4 ↔ IPv6），前缀列表规则只读。
+- 按 `security_group_rule_id` 删除不存在的规则会报 `InvalidParam.SecurityGroupRuleId`，需提示「可能已被删除」并刷新；新增重复规则会静默成功但不新增，不能谎报。
+- `DescribeInstancesRequest.instance_ids` 是**逗号分隔字符串**，`DescribeInstanceStatusRequest.instance_id` 才是 `List[str]`。
+- 批量生命周期接口单次最多 100 台（`BATCH_LIMIT`，超出自动分批）；`StopInstancesRequest` 用 `force_stop` + `stopped_mode`，而 `RebootInstancesRequest` 用 **`force_reboot`**（单台 `RebootInstance` 才是 `force_stop`），`instance_id` 均为 `List[str]`。部分批次失败返回 `BatchResult(success, failed)`，全部失败才抛 `AliyunApiError`。
+- 批量状态轮询 `wait_instances_status()` 复用 `DescribeInstanceStatus(instance_id=[...])`（≤100/次）；`wait_instance_status()` 是它的单台封装。
+- `DescribeVpcsRequest` 只支持 `page_number/page_size`（无 `max_results/next_token`）；`CreateSecurityGroupRequest` 的 `vpc_id` 为空时传 `None`，`security_group_type` 不传即 normal。删除仍被引用的安全组会返回 `DependencyViolation`，服务层统一转成「安全组仍被实例或其他资源使用，请先解绑」。
+- `RunCommandRequest` 的参数名是 **`type`**（不是 `command_type`），需配合 `command_content` / `content_encoding="PlainText"` / `timeout` / `name`；结果取 `DescribeInvocationResults` 的 `invocation.invocation_results.invocation_result[0]`，终态集合为 `Finished/Success/Failed/Stopped/Timeout`。
+- `DescribeInstanceAutoRenewAttributeRequest.instance_id` 是**逗号分隔字符串**（不是 List），`page_number/page_size` 是**字符串**；查询失败不得阻塞实例详情（返回空 dict）。
+- `DescribeEipAddresses` 用 `page_number/page_size` 翻页、`associated_instance_id` 过滤；`internet_charge_type=PayByTraffic` 时不提供改带宽入口，`ModifyInstanceNetworkSpec` 仅对 `PayByBandwidth` 且实例处于 Running/Stopped 时可用（会立即影响计费，必须二次确认）。没有 EIP 但有普通公网 IP 的实例同样可调（回落到 `InstanceInfo.internet_charge_type` / `bandwidth_out`）；本地上限按付费类型：包年包月 200 Mbps、按量付费 100 Mbps（服务端 0 也合法，界面限制 1 起）。`get_bandwidth_limit()` 用 `DescribeBandwidthLimitation` 查询规格上限，失败时回落到上述常量，不得因查询失败禁用入口。
+- 到期提醒阈值 `EXPIRE_WARN_DAYS = 15`：列表列格式 `YYYY-MM-DD 剩N天`（窄列自动退化为 `剩N天`），≤15 天黄色、已过期红色；`PostPaid` 到期显示 `-`。
+- **ECS 监控**：`DescribeInstanceMonitorDataRequest` **没有 `region_id` 参数**（地域靠 client endpoint），`start_time` / `end_time` 必须 ISO8601 带秒（`%Y-%m-%dT%H:%M:%SZ`，`%H:%MZ` 会 400 `InvalidStartTime.Malformed`），`period` 只接受 60/600/3600，`(end-start)/period ≤ 400` 点、只能查近 30 天、单台查询。当前分钟的点可能还是 0（未聚合完）→ `drop_incomplete_tail()` 必须丢弃。**ECS 接口没有内存、没有磁盘空间使用率**。
+- **云监控 Cms** 用已装的 `alibabacloud-tea-openapi` 通用 `call_api`（无需新依赖）：`Params(action="DescribeMetricList", version="2019-01-01", style="RPC", ...)`，endpoint `metrics.{region}.aliyuncs.com`，query 含 `Namespace/MetricName/Dimensions(JSON 字符串)/Period/StartTime(ms)/EndTime(ms)/Length(≤1440)`。`Datapoints` 是 **JSON 字符串**；403 有两种形态：`DescribeMetricList` 抛 `ClientException`，`DescribeMetricLast` 返回 HTTP 200 + body `Success=false, Code=403`，两条都要判。`diskusage_utilization` 同一 timestamp 每个 device 一条，需本地按 ts 取 max；限流 50 次/秒，Metric List/Last/Data/Top 合计 100 万次/月，禁止秒级轮询（进程内缓存 60 秒）。
+- **详情页「刷新」按钮挂顶栏**（`compose_toolbar()` 的 `#dt-refresh`），不放基本信息面板：60 列下 `[开机][关机][重启][执行命令]` 已占满面板宽，第 5 个按钮会越出圆角边框。
+- **详情页自动刷新**：`AUTO_OVERVIEW_SECONDS = 60`（基本信息页读数卡，`window="1h"`）/ `AUTO_MONITOR_SECONDS = 15`（监控页折线）。`_tick_*` 统一经 `_can_auto_refresh(pane_id)` 门控——本屏必须 `app.screen is self` 且停在目标页签，否则让路；读数卡取数走 `_request_readout()` + `_ov_loading` 去重（挂载与切页签会各触发一次，不去重就会重复打接口）。
+- **`get_series(..., max_age=0)` 绕过 60 秒缓存**：自动刷新必须传 0（否则拿到的是同一份旧快照），手动刷新 / 切页签走缓存（`invalidate()` 后再取）。
+- **`TabPane.Focused` 会抢页签**：`TabbedContent` 收到「页签内控件获得焦点」就把 active 切回该页，`_load_monitor` 结束后无条件 `previous.focus()` 会在用户已切走页签时把页面拽回监控页。还原焦点前必须同时满足「焦点未被移走（`app.focused in (None, previous)`）」和「仍在监控页签」。测试里切页签前先 `query_one("#dt-tabs Tabs").focus()`，与真实操作一致。
+- **内置 `Sparkline` 不能用**：它按数据自身 min/max 归一化（恒定 50% 与 0% 画出来一样）、`height>1` 是填充面积、塞进 DataTable 会被压成 2 列。折线图用自绘 braille（`ui.LineChart`，`StripRenderable` + Bresenham + 均值降采样）；braille 空单元必须写 `" "`，不能写 `U+2800`（部分字体会显示脏点）。
+- `LineChart.CursorMoved` 的 `control` 返回消息里显式保存的 `chart`，**不能依赖 `Message._sender`**：`_sender` 是构造消息时的 active message pump（可能是 Screen），用它做 `is` 比较会把发消息的图自己也清掉。
 
 ## 依赖与质量
 
@@ -287,8 +312,9 @@ aliyun_controller/
 
 ## 验证（本项目脚本）
 
-- `/tmp/opencode/aliyun_ui_check2.py`（35 断言：取数流程/键位/Esc 层级）、`/tmp/opencode/aliyun_ui_check3.py`（48 断言：月份浮层/ClickTable/列宽/QuotaBar/设置弹窗）、`/tmp/opencode/dns_form_check.py`（395 断言：类型动态字段/结构值拼装/线路 PickModal/保存编排/三层 Esc）、`/tmp/opencode/dns_status_check.py`（5 条保存差异分流）、`/tmp/opencode/dns_review_check.py`（45 断言：线路/优先级保留回归、冲突预检、权重前提、多次类型切换、窄屏版面）、`/tmp/opencode/dns_shared_check.py`（28 断言：共享 widgets 重构后设置页/首页/账单页/四模态回归）、`/tmp/opencode/confirm_focus_check.py`（10 断言：ConfirmModal 焦点回车语义 + 删除链路）、`/tmp/opencode/aliyun_narrow_modal_check.py`（20 断言：60/80 列下五类模态 max-width 兜底），可作新脚本模板。
-- 做法：`ALIYUN_CONTROLLER_CONFIG_DIR` 指向临时目录并写 `config.yaml`；`app._billing = FakeBilling(); app._dns = FakeDns()` 屏蔽网络。
+- 校验脚本统一放在 `~/devchecks/aliyun-controller/`（`/tmp` 是 tmpfs，重启即清空，勿只留副本）；运行方式 `cd /webservices/aliyun-controller && ./venv/bin/python ~/devchecks/aliyun-controller/<script>.py`：`aliyun_ui_check2.py`（取数流程/键位/Esc 层级）、`aliyun_ui_check3.py`（月份浮层/ClickTable/列宽/QuotaBar/设置弹窗）、`dns_form_check.py`（类型动态字段/结构值拼装/线路 PickModal/保存编排/三层 Esc）、`dns_status_check.py`（保存差异分流）、`ecs_ui_check.py`（89 断言：地域探测/实例门控/详情页/规则增删改/Esc 层级/窄屏版面）、`ecs_p1_check.py`（约 101 断言：批量标记与下发参数/关机选项/安全组建删/云助手命令/续费到期/EIP 带宽/窄屏）、`ecs_scroll_check.py`（13 断言：详情页进入不自动滚底、页签键位与顺序、基本信息页滚动）、`ecs_service_check.py`（44 断言：SDK 请求构造/分页/探测/轮询/安全组按 ID 单个查询）、`ecs_review_check.py`（17 断言：端口归一/IPv4↔IPv6 拦截/切换地域栈/光标保持/返回刷新）、`ecs_monitor_check.py`（166 断言：监控纯函数/CMS+ECS 请求构造/403 两种形态降级/空数据/监控页签懒加载/窗口切换/Chart 像素与光标/读数卡与不可用原因/自动刷新门控与 `max_age`/未挂载守卫/带宽上限查询）、`ui_widgets_check.py`（27 断言：QuotaBar 三段比例、MonthPicker 挂载与卸载语义、HintBar 竞态、设置页 Secret 留空保持原值与脱敏显示），可作新脚本模板。
+- **脚本取像坑**：容器内控件断言渲染内容要用 `widget.render_lines(Region(0, 0, w, h))`，传 `widget.region` 会把绝对偏移当原点、读回整片空白（曾据此误判「折线图没画出来」）；断言必须校验**像素本身**（braille 码点计数、刻度文本、光标列数增量），只断言行数等于控件高度等于没测。
+- 做法：`ALIYUN_CONTROLLER_CONFIG_DIR` 指向临时目录并写 `config.yaml`；`app._billing = FakeBilling(); app._dns = FakeDns(); app._ecs = FakeEcs()` 屏蔽网络。
 
 ## 提交
 

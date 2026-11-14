@@ -246,6 +246,53 @@ Button:disabled {
     text-style: bold;
 }
 
+/* ---------- 折线图（braille 自绘） ---------- */
+LineChart > .chart--axis {
+    color: $text-muted;
+}
+
+LineChart > .chart--grid {
+    color: $panel-lighten-1;
+}
+
+LineChart > .chart--cursor {
+    color: $warning;
+    background: $boost;
+}
+
+LineChart > .chart--s0 {
+    color: $success;
+}
+
+LineChart > .chart--s1 {
+    color: $primary;
+}
+
+LineChart > .chart--s2 {
+    color: $secondary;
+}
+
+/* ---------- 监控页 ---------- */
+.mon-head {
+    height: auto;
+}
+
+.mon-bar {
+    height: 1;
+}
+
+.mon-empty {
+    height: auto;
+    color: $text-muted;
+}
+
+.mon-readout {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
 /* ---------- 底部状态栏 ---------- */
 #status {
     height: 1;

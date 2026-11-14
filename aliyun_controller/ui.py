@@ -4,19 +4,25 @@
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 from rich.cells import cell_len
+from rich.segment import Segment
 from rich.text import Text
-from textual import on
+from textual import events, on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import Screen
+from textual.strip import Strip, StripRenderable
+from textual.widget import Widget
 from textual.widgets import Button, Input, OptionList, Static, TextArea
 
 try:  # 不同 textual 版本 Option 导出位置不同
@@ -183,7 +189,8 @@ class MonthPicker(Horizontal):
                             yield Button(f"{m:02d}", id=f"mp-m{m:02d}", classes="mp-m")
 
     def watch_value(self, value: str) -> None:
-        if self.is_mounted:
+        # 父件 is_mounted 为 True 时子件可能已先行卸载（切屏 / 退出竞态），统一按查得到与否判定
+        with contextlib.suppress(NoMatches):
             self.query_one("#mp-cur", Button).label = value
             if self._popup_open:
                 self._rebuild_popup()
@@ -237,7 +244,7 @@ class MonthPicker(Horizontal):
         if not self._popup_open:
             return
         self._popup_open = False
-        if self.is_mounted:
+        with contextlib.suppress(NoMatches):  # 同上：子件可能已先行卸载
             self.query_one("#mp-pop").display = False
 
     def _rebuild_popup(self) -> None:
@@ -315,6 +322,429 @@ def quota_caption(used: float, free: float = 20.0) -> Text:
     if used > free:
         t.stylize(STYLE_ERR)
     return t
+
+
+# ---------------------------------------------------------------- 折线图
+
+@dataclass
+class ChartSeries:
+    """一条曲线：points 可以是 float，也可以是带 ``ts`` / ``value`` 属性的 MetricPoint。"""
+
+    label: str = ""
+    points: list = field(default_factory=list)
+    css_class: str = "chart--s0"
+
+
+_BRAILLE_BITS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+
+
+def _point_value(point) -> float:
+    if isinstance(point, (int, float)):
+        return float(point)
+    return float(point.value)
+
+
+def _point_time(point):
+    return getattr(point, "ts", None)
+
+
+def _downsample(values: Sequence[float], target: int) -> list[float]:
+    """均值降采样：数据点多于 dot 列数时按桶取均值。"""
+    if target <= 0 or not values:
+        return []
+    if len(values) <= target:
+        return [float(v) for v in values]
+    out: list[float] = []
+    total = len(values)
+    for index in range(target):
+        start = int(index * total / target)
+        end = max(start + 1, int((index + 1) * total / target))
+        chunk = values[start:end]
+        out.append(sum(chunk) / len(chunk))
+    return out
+
+
+def _nice_ceiling(value: float) -> float:
+    """非百分比指标的取整上界（5/10/20/25/50/100…）。"""
+    if value <= 0:
+        return 1.0
+    for step in (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000):
+        if value <= step:
+            return float(step)
+    return float(math.ceil(value / 1000.0) * 1000)
+
+
+class LineChart(Widget):
+    """自绘 braille 折线图：固定 Y 轴量程、时间序列、光标取值。
+
+    - 颜色只走 component class（``chart--s0/1/2``），色值在 app.tcss 定义；
+    - 空序列画坐标框 + 「无数据」，单点画一个点，均不崩；
+    - 数据点多于 dot 列数时按均值降采样；
+    - 按 (宽, 高, 数据版本, 光标) 缓存 StripRenderable。
+    """
+
+    COMPONENT_CLASSES = {
+        "chart--axis",
+        "chart--grid",
+        "chart--cursor",
+        "chart--s0",
+        "chart--s1",
+        "chart--s2",
+    }
+
+    DEFAULT_CSS = """
+    LineChart {
+        width: 1fr;
+        height: 10;
+    }
+    """
+
+    BINDINGS = [
+        Binding("left", "cursor_left", show=False),
+        Binding("right", "cursor_right", show=False),
+        Binding("home", "cursor_home", show=False),
+        Binding("end", "cursor_end", show=False),
+    ]
+
+    series = reactive([], init=False)
+    cursor = reactive(None)
+
+    class CursorMoved(Message):
+        """光标移动：index 为 None 表示已清除光标。"""
+
+        def __init__(self, chart: LineChart, index: int | None, point) -> None:
+            super().__init__()
+            self.chart = chart
+            self.index = index
+            self.point = point
+
+        @property
+        def control(self) -> LineChart:
+            """供 @on(..., "#id") 选择器匹配；同时用于区分是哪张图发出的消息。"""
+            return self.chart
+
+    def __init__(
+        self,
+        *,
+        id: str | None = None,
+        ymin: float = 0.0,
+        ymax: float = 100.0,
+        chart_height: int = 6,
+        x_labels: tuple[str, str, str] = ("", "", ""),
+        auto_scale: bool = False,
+        y_suffix: str = "%",
+        **kwargs,
+    ) -> None:
+        super().__init__(id=id, **kwargs)
+        self.can_focus = True
+        self.ymin = float(ymin)
+        self.ymax = float(ymax)
+        self.chart_height = max(1, int(chart_height))
+        self.auto_scale = auto_scale
+        self.y_suffix = y_suffix
+        self._x_labels = tuple(x_labels)
+        self._version = 0
+        self._cache_key = None
+        self._cache: StripRenderable | None = None
+        self._height_set = self.chart_height + 1
+        self.styles.height = self._height_set
+
+    # ------------------------------------------------------------ 数据
+
+    def set_series(self, series: Sequence[ChartSeries], *, x_labels=None) -> None:
+        self.series = list(series)
+        if x_labels is not None:
+            self._x_labels = tuple(x_labels)
+        self._version += 1
+        self._cache_key = None
+        length = self._length()
+        if self.cursor is not None and (length == 0 or self.cursor >= length):
+            self.cursor = None
+        self.refresh()
+
+    def watch_series(self, value) -> None:
+        self._version += 1
+        self._cache_key = None
+        self.refresh(layout=True)
+
+    def watch_cursor(self, value) -> None:
+        self._cache_key = None
+        self.refresh()
+
+    def _first_points(self) -> list:
+        for item in self.series:
+            if item.points:
+                return list(item.points)
+        return []
+
+    def _length(self) -> int:
+        return max((len(item.points) for item in self.series), default=0)
+
+    # ------------------------------------------------------------ 光标
+
+    def action_cursor_left(self) -> None:
+        length = self._length()
+        if length == 0:
+            return
+        self.cursor = length - 1 if self.cursor is None else max(0, self.cursor - 1)
+        self._emit_cursor()
+
+    def action_cursor_right(self) -> None:
+        length = self._length()
+        if length == 0:
+            return
+        self.cursor = 0 if self.cursor is None else min(length - 1, self.cursor + 1)
+        self._emit_cursor()
+
+    def action_cursor_home(self) -> None:
+        if self._length():
+            self.cursor = 0
+            self._emit_cursor()
+
+    def action_cursor_end(self) -> None:
+        length = self._length()
+        if length:
+            self.cursor = length - 1
+            self._emit_cursor()
+
+    def key_escape(self, event: events.Key) -> None:
+        """有光标时清除并吃掉 Esc；无光标时冒泡给 PageScreen 返回。"""
+        if self.cursor is None:
+            return
+        self.cursor = None
+        self._emit_cursor()
+        event.stop()
+
+    def _emit_cursor(self) -> None:
+        point = None
+        points = self._first_points()
+        if self.cursor is not None and 0 <= self.cursor < len(points):
+            point = points[self.cursor]
+        self.post_message(self.CursorMoved(self, self.cursor, point))
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self.focus()
+        length = self._length()
+        if length == 0:
+            return
+        axis_width = self._axis_width()
+        plot_width = max(1, self.size.width - axis_width)
+        x = max(0, min(event.x - axis_width, plot_width - 1))
+        self.cursor = 0 if length == 1 else round(x * (length - 1) / max(1, plot_width - 1))
+        self._emit_cursor()
+
+    # ------------------------------------------------------------ 尺寸 / 渲染
+
+    def _axis_width(self) -> int:
+        return 0 if self.size.width < 46 else 6
+
+    def _plot_height(self) -> int:
+        return max(1, min(self.chart_height, self.size.height - 1))
+
+    def on_resize(self, event: events.Resize) -> None:
+        desired = (4 if self.size.width < 46 else self.chart_height) + 1
+        if desired != self._height_set:
+            self._height_set = desired
+            self.styles.height = desired
+        self._cache_key = None
+        self.refresh()
+
+    def _scale(self) -> tuple[float, float]:
+        ymin, ymax = self.ymin, self.ymax
+        if self.auto_scale:
+            values = [_point_value(p) for item in self.series for p in item.points]
+            ymin = 0.0
+            ymax = _nice_ceiling(max(values) if values else 0.0)
+        if ymax <= ymin:
+            ymax = ymin + 1.0
+        return ymin, ymax
+
+    def _format_tick(self, value: float) -> str:
+        if self.y_suffix == "%":
+            return f"{value:.0f}%"
+        return f"{value:g}{self.y_suffix}"
+
+    def _default_x_labels(self) -> tuple[str, str, str]:
+        if any(self._x_labels):
+            return self._x_labels
+        points = self._first_points()
+        if len(points) < 2:
+            return ("", "", "")
+        times = [_point_time(p) for p in points]
+        times = [t for t in times if isinstance(t, datetime.datetime)]
+        if len(times) < 2:
+            return ("", "", "")
+        span = times[-1] - times[0]
+        fmt = "%m-%d %H:%M" if span > datetime.timedelta(days=2) else "%H:%M"
+        local = [t.astimezone() for t in (times[0], times[len(times) // 2], times[-1])]
+        return tuple(t.strftime(fmt) for t in local)  # type: ignore[return-value]
+
+    @staticmethod
+    def _put_text(row: list, start: int, text: str, style) -> None:
+        """按显示宽度把文本写入单元格行（宽字符占两格）。"""
+        col = start
+        for char in text:
+            width = cell_len(char)
+            if col + width > len(row):
+                break
+            row[col] = (char, style)
+            for offset in range(1, width):
+                row[col + offset] = ("", style)
+            col += width
+
+    @staticmethod
+    def _row_strip(cells: list[tuple[str, object]]) -> Strip:
+        segments: list[Segment] = []
+        run: list[str] = []
+        run_style = None
+        for char, style in cells:
+            if not char:
+                continue
+            if run and style != run_style:
+                segments.append(Segment("".join(run), run_style))
+                run = []
+            run_style = style
+            run.append(char)
+        if run:
+            segments.append(Segment("".join(run), run_style))
+        return Strip(segments, sum(cell_len(char) for char, _ in cells))
+
+    def _build(self, width: int, height: int) -> StripRenderable:
+        if width <= 0 or height <= 0:
+            return StripRenderable([], max(0, width))
+        axis_style = self.get_component_rich_style("chart--axis")
+        grid_style = self.get_component_rich_style("chart--grid")
+        cursor_style = self.get_component_rich_style("chart--cursor")
+        plot_height = max(1, min(self.chart_height, height - 1))
+        axis_width = 0 if width < 46 else 6
+        plot_width = max(1, width - axis_width)
+        ymin, ymax = self._scale()
+
+        rows: list[list[tuple[str, object]]] = []
+        label_rows = {0, plot_height // 2, plot_height - 1}
+
+        # 数据 → braille 点阵
+        bits = [[0] * plot_width for _ in range(plot_height)]
+        colors: list[list[object]] = [[None] * plot_width for _ in range(plot_height)]
+        has_data = any(item.points for item in self.series)
+        if has_data:
+            dot_width = plot_width * 2
+            dot_height = plot_height * 4
+            for item in self.series[:3]:
+                values = [_point_value(p) for p in item.points]
+                if not values:
+                    continue
+                values = _downsample(values, dot_width)
+                count = len(values)
+                style_name = item.css_class if item.css_class in self.COMPONENT_CLASSES else "chart--s0"
+                style = self.get_component_rich_style(style_name)
+                dots = []
+                for i, value in enumerate(values):
+                    x = (dot_width - 1) // 2 if count == 1 else round(i * (dot_width - 1) / (count - 1))
+                    ratio = (value - ymin) / (ymax - ymin)
+                    y = dot_height - 1 - round(max(0.0, min(1.0, ratio)) * (dot_height - 1))
+                    dots.append((x, y))
+                if count == 1:
+                    segments = [(dots[0], dots[0])]
+                else:
+                    segments = list(zip(dots, dots[1:], strict=False))
+                for (x0, y0), (x1, y1) in segments:
+                    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+                    sx = 1 if x0 < x1 else -1
+                    sy = 1 if y0 < y1 else -1
+                    err = dx + dy
+                    while True:
+                        cell_x, cell_y = x0 >> 1, y0 >> 2
+                        if 0 <= cell_x < plot_width and 0 <= cell_y < plot_height:
+                            bits[cell_y][cell_x] |= _BRAILLE_BITS[x0 & 1][y0 & 3]
+                            colors[cell_y][cell_x] = style
+                        if x0 == x1 and y0 == y1:
+                            break
+                        e2 = 2 * err
+                        if e2 >= dy:
+                            err += dy
+                            x0 += sx
+                        if e2 <= dx:
+                            err += dx
+                            y0 += sy
+
+        for row_index in range(plot_height):
+            row: list[tuple[str, object]] = [(" ", None)] * plot_width
+            # 网格点线（只画刻度行）
+            if row_index in label_rows and plot_height > 1:
+                for col in range(plot_width):
+                    row[col] = ("·", grid_style)
+            if has_data:
+                for col in range(plot_width):
+                    if bits[row_index][col]:
+                        row[col] = (chr(0x2800 + bits[row_index][col]), colors[row_index][col])
+            # 底部横轴
+            if row_index == plot_height - 1 and not has_data:
+                for col in range(plot_width):
+                    row[col] = ("─", axis_style)
+            if axis_width:
+                if row_index in label_rows and plot_height > 1:
+                    value = ymax - (ymax - ymin) * row_index / (plot_height - 1)
+                    label = self._format_tick(value)[: axis_width - 1].rjust(axis_width - 1)
+                else:
+                    label = " " * (axis_width - 1)
+                prefix = [(char, axis_style) for char in label] + [("│", axis_style)]
+                row = prefix + row
+            rows.append(row)
+
+        if not has_data:
+            # 中间一行灰字提示（任何情况下都不画 0%）
+            middle = rows[plot_height // 2]
+            text = "无数据"
+            text_width = cell_len(text)
+            start = axis_width + max(0, (plot_width - text_width) // 2)
+            self._put_text(middle, start, text, axis_style)
+
+        # 光标列
+        if self.cursor is not None and has_data:
+            points = self._first_points()
+            count = len(points)
+            if count:
+                dot_width = plot_width * 2
+                x = (dot_width - 1) // 2 if count == 1 else round(self.cursor * (dot_width - 1) / (count - 1))
+                col = min(plot_width - 1, max(0, x >> 1))
+                for row_index in range(plot_height):
+                    rows[row_index][axis_width + col] = ("│", cursor_style)
+
+        strips = [self._row_strip(row) for row in rows]
+
+        # 底部 X 轴时间标签
+        if height > plot_height:
+            label_row: list[tuple[str, object]] = [(" ", None)] * width
+            first, middle, last = self._default_x_labels()
+            first = first[: max(0, plot_width)] if first else ""
+            last = last[: max(0, plot_width)] if last else ""
+            if first and last and cell_len(first) + cell_len(last) + 2 <= plot_width:
+                self._put_text(label_row, axis_width, first, axis_style)
+                self._put_text(label_row, width - cell_len(last), last, axis_style)
+                if middle and cell_len(middle) + 4 <= plot_width:
+                    middle_start = axis_width + (plot_width - cell_len(middle)) // 2
+                    if middle_start > axis_width + cell_len(first) + 1 and (
+                        middle_start + cell_len(middle) < width - cell_len(last) - 1
+                    ):
+                        self._put_text(label_row, middle_start, middle, axis_style)
+            elif last:
+                self._put_text(label_row, width - cell_len(last), last, axis_style)
+            strips.append(self._row_strip(label_row))
+
+        return StripRenderable(strips, width)
+
+    def render(self) -> StripRenderable:
+        width, height = self.size.width, self.size.height
+        _, ymax = self._scale()
+        key = (width, height, self._version, self.cursor, round(ymax, 6), self.auto_scale)
+        if self._cache_key == key and self._cache is not None:
+            return self._cache
+        result = self._build(width, height)
+        self._cache_key = key
+        self._cache = result
+        return result
 
 
 # ---------------------------------------------------------------- 页面骨架

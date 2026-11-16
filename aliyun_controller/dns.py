@@ -789,7 +789,7 @@ class AliCloudDnsQuerier:
     def set_record_weight(self, record_id: str, weight: int) -> None:
         request = alidns_models.UpdateDNSSLBWeightRequest(record_id=record_id, weight=weight)
         try:
-            self.client.update_dnsslb_weight(request)
+            self.client.update_dnsslbweight(request)
         except Exception as e:  # noqa: BLE001
             raise AliyunApiError(format_api_error(e, "设置解析记录权重")) from e
 
@@ -805,7 +805,7 @@ class AliCloudDnsQuerier:
             line=line,
         )
         try:
-            response = self.client.set_dnsslb_status(request)
+            response = self.client.set_dnsslbstatus(request)
         except Exception as e:  # noqa: BLE001
             raise AliyunApiError(format_api_error(e, "设置权重开关")) from e
         return response.body.to_map().get("RecordCount")
@@ -822,7 +822,7 @@ class AliCloudDnsQuerier:
                     page_number=page_number,
                     page_size=page_size,
                 )
-                response = self.client.describe_dnsslb_sub_domains(request)
+                response = self.client.describe_dnsslbsub_domains(request)
                 data = response.body.to_map()
                 items = data.get("SlbSubDomains", {}).get("SlbSubDomain", []) or []
                 for item in items:

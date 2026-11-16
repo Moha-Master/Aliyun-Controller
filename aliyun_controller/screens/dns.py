@@ -3,6 +3,7 @@
 版式：内容区 = 小容器（.panel：筛选 / 排序 / 主操作按钮）+ 大容器（.tbl 表格，1fr 单滚动条）。
 """
 import asyncio
+from collections.abc import Callable
 
 from rich.text import Text
 from textual import on, work
@@ -62,10 +63,37 @@ def _rr_key(rr) -> str:
     return str(rr or "").strip().lower()
 
 
+def _subdomain_rr(sub_domain, domain_name: str) -> str:
+    """把 DescribeDNSSLBSubDomains 的 SubDomain（www.example.com / @.example.com）还原为 RR。"""
+    sub = str(sub_domain or "").strip().lower()
+    domain = str(domain_name or "").strip().lower()
+    if domain:
+        if sub == f"@{domain}":
+            return "@"
+        suffix = f".{domain}"
+        if sub.endswith(suffix):
+            return sub[: -len(suffix)] or "@"
+    return sub
+
+
+def _is_wildcard(rr) -> bool:
+    return str(rr or "").strip().startswith("*")
+
+
 def _supports_weight(record_type) -> bool:
     """该记录类型是否可参与加权轮询（阿里云仅 A / AAAA / CNAME / ALIAS）。"""
     spec = get_record_type(record_type)
     return bool(spec and spec.supports_weight)
+
+
+def _weight_eligible(record: dict) -> bool:
+    """记录能否参与加权轮询：类型支持、已启用、非泛解析、未锁定。"""
+    return (
+        _supports_weight(record.get("Type"))
+        and _is_enabled(record)
+        and not _is_wildcard(record.get("RR"))
+        and not record.get("Locked")
+    )
 
 
 def _to_int(value) -> int | None:
@@ -183,9 +211,15 @@ class DomainListScreen(PageScreen):
 class RecordFormModal(FormModal):
     """解析记录表单：类型驱动子字段 + 线路 / 优先级 / 权重 / 备注 + 跨字段校验。"""
 
-    def __init__(self, record: dict | None = None, domain_name: str = "") -> None:
+    def __init__(
+        self,
+        record: dict | None = None,
+        domain_name: str = "",
+        weight_group_open: Callable[[str, str, str], bool] | None = None,
+    ) -> None:
         self.record = record or {}
         self.domain_name = domain_name
+        self._weight_group_open_fn = weight_group_open
         self.is_new = record is None
         cur_type = normalize_record_type(self.record.get("Type") or "A") or "A"
         self._initial_type = cur_type
@@ -216,11 +250,22 @@ class RecordFormModal(FormModal):
                 return {field.name: value}
         return {spec.fields[0].name: value} if spec.fields else {"value": value}
 
+    def _weight_group_open(self, rr, record_type, line) -> bool:
+        """该 (主机记录, 类型, 线路) 的权重组是否已开启；未开启时 Weight 只是 API 默认占位值。"""
+        if not self._weight_group_open_fn:
+            return False
+        try:
+            return bool(self._weight_group_open_fn(str(rr or ""), str(record_type or ""), str(line or "default")))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _initial_values(self) -> dict:
         spec = get_record_type(self._initial_type)
         line = "default" if spec and spec.line_locked else self._initial_line
         priority = self.record.get("Priority")
-        weight = self.record.get("Weight")
+        group_open = self._weight_group_open(self.record.get("RR"), self._initial_type, line)
+        # DescribeDomainRecords 对每条记录都会返回 Weight（默认 1），只有权重组开启时才是真实值
+        weight = self.record.get("Weight") if group_open else None
         values = {
             "type": self._initial_type,
             "rr": self.record.get("RR", ""),
@@ -312,9 +357,13 @@ class RecordFormModal(FormModal):
         ))
 
         if spec and spec.supports_weight:
+            group_open = self._weight_group_open(rr, code, line)
+            if group_open:
+                hint = "0–100，留空=不修改；0=不参与返回（服务端可能拒绝）"
+            else:
+                hint = "0–100；当前未开启权重，填写即开启该主机记录/线路/类型下的权重（需 ≥2 条同类型可加权记录）"
             fields.append(FormField(
-                "weight", "权重", value=str(values.get("weight", "")),
-                hint="0–100，留空=不修改；需同主机记录+同线路存在 2 条可加权记录；0=不参与返回，服务端可能拒绝",
+                "weight", "权重", value=str(values.get("weight", "")), hint=hint,
             ))
 
         fields.append(FormField(
@@ -509,6 +558,9 @@ class RecordListScreen(PageScreen):
         self._sort_type = 0
         self._sort_order = 0
         self._line_names: dict[str, str] = {}
+        # 已开启权重配置的组：{"(rr, type)"} 表示整组开启；{"(rr, type, line)"} 表示按线路开启
+        self._weight_open_any: set = set()
+        self._weight_open_lines: set = set()
 
     def compose_page(self):
         with Vertical(classes="panel"):
@@ -557,10 +609,14 @@ class RecordListScreen(PageScreen):
                 lines = dns.get_support_lines(self.domain_name)
             except Exception:  # noqa: BLE001
                 lines = []
-            return records, lines
+            try:
+                slb = dns.get_slb_sub_domains(self.domain_name)
+            except Exception:  # noqa: BLE001
+                slb = []
+            return records, lines, slb
 
         try:
-            records, lines = await asyncio.to_thread(_fetch)
+            records, lines, slb = await asyncio.to_thread(_fetch)
         except AliyunApiError as e:
             self.app.notify_err(str(e))
             self._records = []
@@ -580,7 +636,28 @@ class RecordListScreen(PageScreen):
             for item in lines
             if item.get("code")
         }
+        self._apply_slb_state(slb)
         self._rebuild()
+
+    def _apply_slb_state(self, items: list) -> None:
+        """记录哪些 (RR, 类型[, 线路]) 的权重组已开启，供表单预填权重与保存判断。"""
+        self._weight_open_any = set()
+        self._weight_open_lines = set()
+        for item in items or []:
+            rr = _subdomain_rr(item.get("sub_domain"), self.domain_name)
+            record_type = normalize_record_type(item.get("type")) or str(item.get("type") or "").upper()
+            if not rr or not record_type:
+                continue
+            if item.get("open"):
+                self._weight_open_any.add((_rr_key(rr), record_type))
+            for line, open_ in (item.get("lines") or {}).items():
+                if open_:
+                    self._weight_open_lines.add((_rr_key(rr), record_type, _line_key(line)))
+
+    def _weight_group_open(self, rr, record_type, line) -> bool:
+        record_type = normalize_record_type(record_type) or ""
+        key = (_rr_key(rr), record_type)
+        return key in self._weight_open_any or key + (_line_key(line),) in self._weight_open_lines
 
     def _line_label(self, line) -> str:
         code = str(line or "default")
@@ -661,7 +738,7 @@ class RecordListScreen(PageScreen):
 
     def _open_record(self, record: dict | None) -> None:
         is_new = record is None
-        modal = RecordFormModal(record, self.domain_name)
+        modal = RecordFormModal(record, self.domain_name, weight_group_open=self._weight_group_open)
         self.app.push_screen(modal, lambda result: self._handle_result(record, is_new, result))
 
     def _handle_result(self, record: dict | None, is_new: bool, result) -> None:
@@ -731,8 +808,10 @@ class RecordListScreen(PageScreen):
         status_changed = (not is_new) and enabled != _is_enabled(record)
         old_remark = str(record.get("Remark") or "").strip()
         remark_changed = bool(remark) if is_new else remark != old_remark
+        group_open = self._weight_group_open(rr, record_type, line)
         old_weight = _to_int(record.get("Weight")) if not is_new else None
-        weight_changed = weight is not None and (is_new or weight != old_weight)
+        # 权重组未开启时，记录上的 Weight 只是 API 默认占位值（通常为 1），不能据此认定"已设置权重"
+        weight_changed = weight is not None and (is_new or not group_open or weight != old_weight)
         line_changed = (not is_new) and _line_key(record.get("Line")) != _line_key(line)
 
         if not is_new and not (content_changed or status_changed or remark_changed or weight_changed):
@@ -749,22 +828,28 @@ class RecordListScreen(PageScreen):
                 self.app.notify_err(self._conflict_message(conflicts))
                 return
 
-        if weight is not None:
+        if weight_changed:
             if not _supports_weight(record_type):
                 self.app.notify_err(f"{record_type} 记录不支持权重设置")
+                return
+            if _is_wildcard(rr):
+                self.app.notify_err("泛解析（*）记录不支持权重设置")
                 return
             same_group = [
                 item for item in self._records
                 if str(item.get("RecordId")) != str(record.get("RecordId"))
                 and _rr_key(item.get("RR")) == _rr_key(rr)
                 and _line_key(item.get("Line")) == _line_key(line)
-                # 只有 A / AAAA / CNAME / ALIAS 能参与加权，TXT/MX 等同名记录不算数
-                and _supports_weight(item.get("Type"))
+                # SetDNSSLBStatus 的权重组维度是「子域名 + 类型 + 线路」，只有可加权的同类型记录才算数
+                and normalize_record_type(item.get("Type")) == record_type
+                and _weight_eligible(item)
             ]
-            count = len(same_group) + 1
+            self_eligible = enabled and not record.get("Locked")
+            count = len(same_group) + (1 if self_eligible else 0)
             if count < 2:
                 self.app.notify_err(
-                    f"同主机记录与线路下至少需要 2 条可加权记录（A/AAAA/CNAME/ALIAS，当前 {count} 条），请先添加其它记录"
+                    f"同主机记录、同线路且同类型下至少需要 2 条可加权记录"
+                    f"（A/AAAA/CNAME/ALIAS，当前 {count} 条），请先添加其它记录"
                 )
                 return
 
